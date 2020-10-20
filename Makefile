@@ -36,6 +36,11 @@ antrea-agent-simulator:
 	@mkdir -p $(BINDIR)
 	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-agent-simulator
 
+.PHONY: antrea-scale
+antrea-scale:
+	@mkdir -p $(BINDIR)
+	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-scale
+
 .PHONY: antrea-agent-instr-binary
 antrea-agent-instr-binary:
 	@mkdir -p $(BINDIR)
@@ -288,6 +293,12 @@ endif
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION)
 
+.PHONY: antrea-scale-image
+antrea-scale-image:
+	@echo "===> Building antrea/antrea-scale Docker image <==="
+	docker build -t antrea/antrea-scale:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.scale .
+	docker tag antrea/antrea-scale:$(DOCKER_IMG_VERSION) antrea/antrea-scale
+
 # Build bins in a golang container, and build the antrea-ubuntu Docker image.
 .PHONY: build-ubuntu
 build-ubuntu:
@@ -345,6 +356,11 @@ manifest:
 manifest-scale:
 	@echo "===> Generating simulator manifest for Antrea <==="
 	$(CURDIR)/hack/generate-manifest.sh --mode dev --simulator > build/yamls/antrea-scale.yml
+
+.PHONY: scale-manifest
+scale-manifest:
+	@echo "===> Generating simulator manifest for Antrea <==="
+	$(CURDIR)/hack/generate-manifest.sh --mode dev --simulator > build/yamls/antrea-simulator.yml
 
 .PHONY: manifest-coverage
 manifest-coverage:

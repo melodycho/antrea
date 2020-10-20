@@ -75,7 +75,6 @@ func run() error {
 		klog.Info("Stopped waiting for Antrea client")
 		return err
 	}
-
 	klog.Info("Antrea client is ready")
 
 	options := metav1.ListOptions{
@@ -147,8 +146,6 @@ func (w *watchWrapper) watch() {
 		watcher.Stop()
 	}()
 	initCount := 0
-
-	// Watch the init events from chan, and log the events
 loop:
 	for {
 		select {
