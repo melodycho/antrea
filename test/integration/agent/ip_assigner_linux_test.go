@@ -15,7 +15,9 @@
 package agent
 
 import (
+	"fmt"
 	"net"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,7 +31,29 @@ import (
 const dummyDeviceName = "antrea-dummy0"
 
 func TestIPAssigner(t *testing.T) {
-	ipAssigner, err := ipassigner.NewIPAssigner(net.ParseIP("127.0.0.1"), dummyDeviceName)
+	linkList, err := net.Interfaces()
+	require.NoError(t, err)
+	getNodeIP := func() net.IP {
+		for _, link := range linkList {
+			if link.HardwareAddr == nil {
+				continue
+			}
+			addrList, err := link.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrList {
+				if ipNet, ok := addr.(*net.IPNet); ok {
+					return ipNet.IP
+				}
+			}
+		}
+		return nil
+	}
+	nodeIP := getNodeIP()
+	require.NotNil(t, nodeIP, "Get Node IP failed")
+
+	ipAssigner, err := ipassigner.NewIPAssigner(nodeIP, dummyDeviceName)
 	require.NoError(t, err, "Initializing IP assigner failed")
 
 	dummyDevice, err := netlink.LinkByName(dummyDeviceName)
@@ -41,11 +65,17 @@ func TestIPAssigner(t *testing.T) {
 
 	ip1 := "10.10.10.10"
 	ip2 := "10.10.10.11"
-	desiredIPs := sets.NewString(ip1, ip2)
+	ip3 := "2021:124:6020:1006:250:56ff:fea7:36c2"
+	desiredIPs := sets.NewString(ip1, ip2, ip3)
 
 	for ip := range desiredIPs {
-		err = ipAssigner.AssignIP(ip)
-		assert.NoError(t, err, "Failed to assign a valid IP")
+		errAssign := ipAssigner.AssignIP(ip)
+		cmd := exec.Command("ip", "addr")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("List ip addr error: %v", err)
+		}
+		assert.NoError(t, errAssign, fmt.Sprintf("Failed to assign a valid IP, ip addrs: %s", string(out)))
 	}
 
 	assert.Equal(t, desiredIPs, ipAssigner.AssignedIPs(), "Assigned IPs don't match")
@@ -55,7 +85,7 @@ func TestIPAssigner(t *testing.T) {
 	assert.Equal(t, desiredIPs, actualIPs, "Actual IPs don't match")
 
 	// NewIPAssigner should load existing IPs correctly.
-	newIPAssigner, err := ipassigner.NewIPAssigner(net.ParseIP("127.0.0.1"), dummyDeviceName)
+	newIPAssigner, err := ipassigner.NewIPAssigner(nodeIP, dummyDeviceName)
 	require.NoError(t, err, "Initializing new IP assigner failed")
 	assert.Equal(t, desiredIPs, newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
 
