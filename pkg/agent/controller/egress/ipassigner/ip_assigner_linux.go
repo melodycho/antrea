@@ -15,7 +15,6 @@
 package ipassigner
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -26,9 +25,9 @@ import (
 
 	"antrea.io/antrea/pkg/agent/util"
 	"antrea.io/antrea/pkg/agent/util/arping"
+	"antrea.io/antrea/pkg/agent/util/ndp"
+	ip2 "antrea.io/antrea/pkg/util/ip"
 )
-
-var ipv6NotSupportErr = errors.New("IPv6 not supported")
 
 // ipAssigner creates a dummy device and assigns IPs to it.
 // It's supposed to be used in the cases that external IPs should be configured on the system so that they can be used
@@ -101,12 +100,24 @@ func (a *ipAssigner) loadIPAddresses() error {
 	return nil
 }
 
+func ipMaskLen(parsedIP net.IP) (maskLen int, ip net.IP) {
+	if isIPv4 := parsedIP.To4(); isIPv4 != nil {
+		maskLen = ip2.V4BitLen
+		ip = isIPv4
+	} else if isIPv6 := parsedIP.To16(); isIPv6 != nil {
+		maskLen = ip2.V6BitLen
+		ip = isIPv6
+	}
+	return maskLen, ip
+}
+
 // AssignIP ensures the provided IP is assigned to the dummy device.
 func (a *ipAssigner) AssignIP(ip string) error {
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
 		return fmt.Errorf("invalid IP %s", ip)
 	}
+	maskLen, netIP := ipMaskLen(parsedIP)
 
 	if err := func() error {
 		a.mutex.Lock()
@@ -117,7 +128,7 @@ func (a *ipAssigner) AssignIP(ip string) error {
 			return nil
 		}
 
-		addr := netlink.Addr{IPNet: &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(32, 32)}}
+		addr := netlink.Addr{IPNet: &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(maskLen, maskLen)}}
 		if err := netlink.AddrAdd(a.dummyDevice, &addr); err != nil {
 			return fmt.Errorf("failed to add IP %v to interface %s: %v", ip, a.dummyDevice.Attrs().Name, err)
 		}
@@ -129,14 +140,16 @@ func (a *ipAssigner) AssignIP(ip string) error {
 		return err
 	}
 
-	isIPv4 := parsedIP.To4()
-	if isIPv4 != nil {
-		if err := arping.GratuitousARPOverIface(isIPv4, a.externalInterface); err != nil {
+	if maskLen == ip2.V4BitLen {
+		if err := arping.GratuitousARPOverIface(netIP, a.externalInterface); err != nil {
 			return fmt.Errorf("failed to send gratuitous ARP: %v", err)
 		}
 		klog.V(2).InfoS("Sent gratuitous ARP", "ip", parsedIP)
-	} else {
-		klog.ErrorS(ipv6NotSupportErr, "Failed to send Advertisement", "ip", parsedIP)
+	} else if maskLen == ip2.V6BitLen {
+		if err := ndp.NeighborAdvertisement(netIP, a.externalInterface); err != nil {
+			return fmt.Errorf("failed to send neighbor advertisement: %v", err)
+		}
+		klog.V(2).InfoS("Sent NDP neighbor advertisement", "ip", parsedIP)
 	}
 	return nil
 }
@@ -147,6 +160,7 @@ func (a *ipAssigner) UnassignIP(ip string) error {
 	if parsedIP == nil {
 		return fmt.Errorf("invalid IP %s", ip)
 	}
+	maskLen, _ := ipMaskLen(parsedIP)
 
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -156,7 +170,7 @@ func (a *ipAssigner) UnassignIP(ip string) error {
 		return nil
 	}
 
-	addr := netlink.Addr{IPNet: &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(32, 32)}}
+	addr := netlink.Addr{IPNet: &net.IPNet{IP: parsedIP, Mask: net.CIDRMask(maskLen, maskLen)}}
 	if err := netlink.AddrDel(a.dummyDevice, &addr); err != nil {
 		return fmt.Errorf("failed to delete IP %v from interface %s: %v", ip, a.dummyDevice.Attrs().Name, err)
 	}
