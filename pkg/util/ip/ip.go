@@ -179,3 +179,18 @@ func MustParseCIDR(cidr string) *net.IPNet {
 	}
 	return ipNet
 }
+
+func CheckIPv6(ip net.IP) error {
+	if ip.To16() == nil || ip.To4() != nil {
+		return fmt.Errorf("invalid IPv6 address: %s", ip.String())
+	}
+	return nil
+}
+
+func MustIPv6(s string) net.IP {
+	ip := net.ParseIP(s)
+	if err := CheckIPv6(ip); err != nil {
+		return nil
+	}
+	return ip
+}
