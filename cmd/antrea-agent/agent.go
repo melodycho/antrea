@@ -224,12 +224,12 @@ func run(o *Options) error {
 	}
 
 	var egressController *egress.EgressController
-	var memberlistServer *memberlist.Server
+	var gossipCluster *memberlist.GossipCluster
 	if features.DefaultFeatureGate.Enabled(features.Egress) {
 		egressController = egress.NewEgressController(ofClient, egressInformer, antreaClientProvider, ifaceStore, routeClient, nodeConfig.Name)
-		memberlistServer, err = memberlist.NewMemberlistServer(o.config.MemberlistPort, nodeInformer, nodeConfig)
+		gossipCluster, err = memberlist.NewGossipCluster(o.config.GossipClusterPort, nodeInformer, nodeConfig)
 		if err != nil {
-			return fmt.Errorf("initializing egress node memberlist server error: %v", err)
+			return fmt.Errorf("initializing egress node memberlist cluster error: %v", err)
 		}
 	}
 
@@ -306,7 +306,7 @@ func run(o *Options) error {
 
 	if features.DefaultFeatureGate.Enabled(features.Egress) {
 		go egressController.Run(stopCh)
-		go memberlistServer.Run(stopCh)
+		go gossipCluster.Run(stopCh)
 	}
 
 	if features.DefaultFeatureGate.Enabled(features.NetworkPolicyStats) {

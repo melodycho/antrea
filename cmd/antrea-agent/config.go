@@ -99,9 +99,9 @@ type AgentConfig struct {
 	// Defaults to 10350.
 	APIPort int `yaml:"apiPort,omitempty"`
 
-	// MemberlistPort is the port for the antrea-agent memberlist APIServer to serve on.
+	// GossipClusterPort is the port for the antrea-agent gossip cluster to serve on.
 	// Defaults to 10351.
-	MemberlistPort int `yaml:"memberlistPort,omitempty"`
+	GossipClusterPort int `yaml:"gossipClusterPort,omitempty"`
 
 	// Enable metrics exposure via Prometheus. Initializes Prometheus metrics listener
 	// Defaults to true.

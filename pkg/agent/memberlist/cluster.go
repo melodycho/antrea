@@ -32,20 +32,20 @@ import (
 
 const defaultInterval = 30 * time.Second
 
-type Server struct {
+type GossipCluster struct {
 	bindPort        int
 	nodeConfig      *config.NodeConfig
 	nodeInformer    coreinformers.NodeInformer
 	memberList      *memberlist.Memberlist
 	memberRWLock    sync.RWMutex
-	existingMembers *[]string
+	existingMembers []string
 	defaultInterval time.Duration
 }
 
-func NewMemberlistServer(p int, nodeInformer coreinformers.NodeInformer, nodeConfig *config.NodeConfig) (*Server, error) {
-	klog.Infof("Node config: %#v", nodeConfig)
+func NewGossipCluster(p int, nodeInformer coreinformers.NodeInformer, nodeConfig *config.NodeConfig) (*GossipCluster, error) {
+	klog.V(1).Infof("Node config: %#v", nodeConfig)
 
-	s := &Server{
+	s := &GossipCluster{
 		bindPort:        p,
 		nodeInformer:    nodeInformer,
 		nodeConfig:      nodeConfig,
@@ -58,7 +58,7 @@ func NewMemberlistServer(p int, nodeInformer coreinformers.NodeInformer, nodeCon
 
 	nodeMember := fmt.Sprintf("%s:%d", hostIP.String(), bindPort)
 
-	klog.Infof("Add new node: %s", nodeMember)
+	klog.V(2).Infof("Add new node: %s", nodeMember)
 
 	conf := memberlist.DefaultLocalConfig()
 	conf.Name = hostname + "-" + strconv.Itoa(bindPort)
@@ -66,7 +66,7 @@ func NewMemberlistServer(p int, nodeInformer coreinformers.NodeInformer, nodeCon
 	conf.BindPort = bindPort
 	conf.AdvertisePort = bindPort
 
-	klog.Infof("Configs: %+v\n", conf)
+	klog.V(1).Infof("Memberlist cluster configs: %+v", conf)
 
 	list, err := memberlist.Create(conf)
 	if err != nil {
@@ -74,10 +74,7 @@ func NewMemberlistServer(p int, nodeInformer coreinformers.NodeInformer, nodeCon
 	}
 
 	s.memberList = list
-	s.existingMembers = &[]string{nodeMember}
-
-	// Join an existing cluster by specifying at least one known member.
-	s.joinMembers(*s.existingMembers)
+	s.existingMembers = []string{nodeMember}
 
 	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.addNodeMemberHandler,
@@ -88,30 +85,30 @@ func NewMemberlistServer(p int, nodeInformer coreinformers.NodeInformer, nodeCon
 	return s, nil
 }
 
-func (ms *Server) convertListNodesToMemberlist() []string {
+func (ms *GossipCluster) convertListNodesToMemberlist() []string {
 	nodes, err := ms.nodeInformer.Lister().List(labels.Everything())
 	if err != nil {
 		klog.Errorf("error when listing Nodes: %v", err)
 	}
-	klog.Infof("List %d nodes", len(nodes))
+	klog.V(3).Infof("List %d nodes", len(nodes))
 
 	clusterNodes := make([]string, len(nodes))
 
 	for i, node := range nodes {
-		klog.Infof("Node %s: %#v", node.Name, node.Status.Addresses)
+		klog.V(4).Infof("Node %s: %#v", node.Name, node.Status.Addresses)
 		address := node.Status.Addresses
 		for _, add := range address {
 			if add.Type == corev1.NodeInternalIP {
 				member := fmt.Sprintf("%s:%d", add.Address, ms.bindPort)
 				clusterNodes[i] = member
-				klog.Infof("Cluster memberlist: %s", member)
+				klog.V(4).Infof("GossipCluster memberlist: %s", member)
 			}
 		}
 	}
 	return clusterNodes
 }
 
-func (ms *Server) addNodeMemberHandler(obj interface{}) {
+func (ms *GossipCluster) addNodeMemberHandler(obj interface{}) {
 	node, ok := obj.(*corev1.Node)
 	if !ok {
 		klog.Errorf("Add node callback error, unexpected object type: %v", obj)
@@ -120,15 +117,15 @@ func (ms *Server) addNodeMemberHandler(obj interface{}) {
 	ms.addMember(node)
 }
 
-func (ms *Server) memberNum() int {
+func (ms *GossipCluster) memberNum() int {
 	ms.memberRWLock.RLock()
 	defer ms.memberRWLock.RUnlock()
 
-	num := len(*ms.existingMembers)
+	num := len(ms.existingMembers)
 	return num
 }
 
-func (ms *Server) addMember(node *corev1.Node) {
+func (ms *GossipCluster) addMember(node *corev1.Node) {
 	ms.memberRWLock.Lock()
 	defer ms.memberRWLock.Unlock()
 	var member string
@@ -138,37 +135,36 @@ func (ms *Server) addMember(node *corev1.Node) {
 		}
 	}
 	if member != "" {
-		*ms.existingMembers = append(*ms.existingMembers, member)
-		ms.joinMembers(*ms.existingMembers)
+		ms.existingMembers = append(ms.existingMembers, member)
+		ms.joinMembers(ms.existingMembers)
 	}
 }
 
-func (ms *Server) joinMembers(clusterNodes []string) {
+func (ms *GossipCluster) joinMembers(clusterNodes []string) {
 	n, err := ms.memberList.Join(clusterNodes)
 	if err != nil {
 		klog.Errorf("Failed to join cluster: %s, cluster nodes: %#v", err.Error(), clusterNodes)
 	}
-	klog.Infof("Join cluster: %v, cluster nodes: %+v", n, clusterNodes)
+	klog.V(2).Infof("Join cluster: %v, cluster nodes: %+v", n, clusterNodes)
 }
 
-func (ms *Server) Run(stopCh <-chan struct{}) {
+func (ms *GossipCluster) Run(stopCh <-chan struct{}) {
 	newClusterMembers := ms.convertListNodesToMemberlist()
 	expectNodeNum := len(newClusterMembers)
-	klog.Infof("List %d nodes: %#v", expectNodeNum, newClusterMembers)
+	klog.V(3).Infof("List %d nodes: %#v", expectNodeNum, newClusterMembers)
 
 	actualMemberNum := ms.memberList.NumMembers()
-	klog.Infof("Nodes num: %d, member num: %d", expectNodeNum, actualMemberNum)
+	klog.V(3).Infof("Nodes num: %d, member num: %d", expectNodeNum, actualMemberNum)
 	if actualMemberNum < expectNodeNum {
 		ms.joinMembers(newClusterMembers)
 	}
 
 	// Ask for members of the cluster
 	for i, member := range ms.memberList.Members() {
-		klog.Infof("Member %d: %s, Address: %s, State: %#v", i, member.Name, member.Addr, member.State)
+		klog.V(4).Infof("Member %d: %s, Address: %s, State: %#v", i, member.Name, member.Addr, member.State)
 	}
 
 	// Memberlist will maintain membership information in the background.
-	// Delegates can be used for receiving events when members join or leave.
 	timeTicker := time.NewTicker(ms.defaultInterval)
 	for {
 		select {
@@ -176,7 +172,7 @@ func (ms *Server) Run(stopCh <-chan struct{}) {
 			return
 		case <-timeTicker.C:
 			for i, member := range ms.memberList.Members() {
-				klog.Infof("Member %d: %s, Address: %s, State: %#v", i, member.Name, member.Addr, member.State)
+				klog.V(5).Infof("Member %d: %s, Address: %s, State: %#v", i, member.Name, member.Addr, member.State)
 			}
 		}
 	}

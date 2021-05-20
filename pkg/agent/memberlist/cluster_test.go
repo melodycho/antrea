@@ -40,7 +40,7 @@ func TestMemberlistServer_Run(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	port := apis.AntreaAgentMemberlistPort + 1
+	port := apis.AntreaAgentGossipClusterPort + 1
 	nodeConfig := &config.NodeConfig{Name: "test_memberlist_node",
 		NodeIPAddr: &net.IPNet{IP: net.IPv4(127, 0, 0, 1),
 			Mask: net.IPv4Mask(255, 255, 255, 255)}}
@@ -59,7 +59,7 @@ func TestMemberlistServer_Run(t *testing.T) {
 		t.Fatalf("add node error: %s", err.Error())
 	}
 
-	s, err := NewMemberlistServer(port, nodeInformer, nodeConfig)
+	s, err := NewGossipCluster(port, nodeInformer, nodeConfig)
 	if err != nil {
 		t.Fatalf("new memberlist server error: %s", err.Error())
 	}
