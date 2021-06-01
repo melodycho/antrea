@@ -85,6 +85,11 @@ antrea-agent-simulator:
 	@mkdir -p $(BINDIR)
 	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-agent-simulator
 
+.PHONY: antrea-scale
+antrea-scale:
+	@mkdir -p $(BINDIR)
+	GOOS=linux $(GO) build -o $(BINDIR) $(GOFLAGS) -ldflags '$(LDFLAGS)' antrea.io/antrea/cmd/antrea-scale
+
 .PHONY: antrea-agent-instr-binary
 antrea-agent-instr-binary:
 	@mkdir -p $(BINDIR)
@@ -331,6 +336,12 @@ else
 	docker build --pull -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.ubuntu $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) antrea/antrea-ubuntu
+
+.PHONY: antrea-scale-image
+antrea-scale-image:
+	@echo "===> Building antrea/antrea-scale Docker image <==="
+	docker build -t antrea/antrea-scale:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.scale .
+	docker tag antrea/antrea-scale:$(DOCKER_IMG_VERSION) antrea/antrea-scale
 
 # Build bins in a golang container, and build the antrea-ubuntu Docker image.
 .PHONY: build-ubuntu
