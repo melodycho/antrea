@@ -16,10 +16,10 @@ package memberlist
 
 import (
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
+	"github.com/golang/groupcache/consistenthash"
 	"github.com/hashicorp/memberlist"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -28,49 +28,63 @@ import (
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/agent/config"
+	"antrea.io/antrea/pkg/util/k8s"
 )
 
-const defaultInterval = 30 * time.Second
+const defaultClusterHealthzAskInterval = 40 * time.Second
 
-type GossipCluster struct {
-	bindPort        int
-	nodeConfig      *config.NodeConfig
-	nodeInformer    coreinformers.NodeInformer
-	memberList      *memberlist.Memberlist
-	memberRWLock    sync.RWMutex
-	existingMembers []string
-	defaultInterval time.Duration
+type ClusterInterface interface {
+	Run(stopCh <-chan struct{})
+	ShouldSelect(name string) bool
+	AddEventHandler(handler clusterNodeEventHandler)
 }
 
-func NewGossipCluster(p int, nodeInformer coreinformers.NodeInformer, nodeConfig *config.NodeConfig) (*GossipCluster, error) {
-	klog.V(1).Infof("Node config: %#v", nodeConfig)
+type clusterNodeEventHandler func(ip string, added bool)
 
-	s := &GossipCluster{
-		bindPort:        p,
-		nodeInformer:    nodeInformer,
-		nodeConfig:      nodeConfig,
-		defaultInterval: defaultInterval,
+type Cluster struct {
+	bindPort                         int
+	NodeConfig                       *config.NodeConfig
+	nodeInformer                     coreinformers.NodeInformer
+	memberList                       *memberlist.Memberlist
+	memberRWLock                     sync.RWMutex
+	existingMembers                  []string
+	defaultClusterHealthzAskInterval time.Duration
+	conHash                          *consistenthash.Map
+	nodeEventsCh                     chan memberlist.NodeEvent
+	ClusterNodeEventHandlers         []clusterNodeEventHandler
+}
+
+func NewCluster(clusterBindPort int, nodeInformer coreinformers.NodeInformer, nodeConfig *config.NodeConfig) (*Cluster, error) {
+	// The Node join/leave events will be notified via it.
+	nodeEventCh := make(chan memberlist.NodeEvent, 1024)
+	s := &Cluster{
+		bindPort:                         clusterBindPort,
+		nodeInformer:                     nodeInformer,
+		NodeConfig:                       nodeConfig,
+		defaultClusterHealthzAskInterval: defaultClusterHealthzAskInterval,
+		nodeEventsCh:                     nodeEventCh,
 	}
+	s.conHash = newNodeConsistentHashMap()
 
-	hostname := s.nodeConfig.Name
 	bindPort := s.bindPort
-	hostIP := s.nodeConfig.NodeIPAddr.IP
+	hostIP := s.NodeConfig.NodeIPAddr.IP
 
 	nodeMember := fmt.Sprintf("%s:%d", hostIP.String(), bindPort)
 
 	klog.V(2).Infof("Add new node: %s", nodeMember)
 
 	conf := memberlist.DefaultLocalConfig()
-	conf.Name = hostname + "-" + strconv.Itoa(bindPort)
+	conf.Name = s.NodeConfig.Name
 
 	conf.BindPort = bindPort
 	conf.AdvertisePort = bindPort
+	conf.Events = &memberlist.ChannelEventDelegate{Ch: nodeEventCh}
 
 	klog.V(1).Infof("Memberlist cluster configs: %+v", conf)
 
 	list, err := memberlist.Create(conf)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create memberlist: %s", err.Error())
+		return nil, fmt.Errorf("failed to create memberlist: %v", err.Error())
 	}
 
 	s.memberList = list
@@ -85,95 +99,150 @@ func NewGossipCluster(p int, nodeInformer coreinformers.NodeInformer, nodeConfig
 	return s, nil
 }
 
-func (ms *GossipCluster) convertListNodesToMemberlist() []string {
-	nodes, err := ms.nodeInformer.Lister().List(labels.Everything())
+func newNodeConsistentHashMap() *consistenthash.Map {
+	return consistenthash.New(3, nil)
+}
+
+func (gc *Cluster) convertListNodesToMemberlist() (clusterNodes []string) {
+	nodes, err := gc.nodeInformer.Lister().List(labels.Everything())
 	if err != nil {
 		klog.Errorf("error when listing Nodes: %v", err)
+		return
 	}
 	klog.V(3).Infof("List %d nodes", len(nodes))
 
-	clusterNodes := make([]string, len(nodes))
-
-	for i, node := range nodes {
+	for _, node := range nodes {
 		klog.V(4).Infof("Node %s: %#v", node.Name, node.Status.Addresses)
-		address := node.Status.Addresses
-		for _, add := range address {
-			if add.Type == corev1.NodeInternalIP {
-				member := fmt.Sprintf("%s:%d", add.Address, ms.bindPort)
-				clusterNodes[i] = member
-				klog.V(4).Infof("GossipCluster memberlist: %s", member)
-			}
+		nodeAddr, err := k8s.GetNodeAddr(node)
+		if err != nil {
+			klog.Errorf("Failed to obtain local IP address from K8s node: %w", err)
+			continue
 		}
+		member := fmt.Sprintf("%s:%d", nodeAddr, gc.bindPort)
+		clusterNodes = append(clusterNodes, member)
 	}
-	return clusterNodes
+	return
 }
 
-func (ms *GossipCluster) addNodeMemberHandler(obj interface{}) {
+func (gc *Cluster) addNodeMemberHandler(obj interface{}) {
 	node, ok := obj.(*corev1.Node)
 	if !ok {
 		klog.Errorf("Add node callback error, unexpected object type: %v", obj)
 		return
 	}
-	ms.addMember(node)
+	gc.addMember(node)
 }
 
-func (ms *GossipCluster) memberNum() int {
-	ms.memberRWLock.RLock()
-	defer ms.memberRWLock.RUnlock()
+func (gc *Cluster) memberNum() int {
+	gc.memberRWLock.RLock()
+	defer gc.memberRWLock.RUnlock()
 
-	num := len(ms.existingMembers)
-	return num
+	return len(gc.existingMembers)
 }
 
-func (ms *GossipCluster) addMember(node *corev1.Node) {
-	ms.memberRWLock.Lock()
-	defer ms.memberRWLock.Unlock()
-	var member string
-	for _, add := range node.Status.Addresses {
-		if add.Type == corev1.NodeInternalIP {
-			member = fmt.Sprintf("%s:%d", add.Address, ms.bindPort)
-		}
-	}
-	if member != "" {
-		ms.existingMembers = append(ms.existingMembers, member)
-		ms.joinMembers(ms.existingMembers)
-	}
-}
-
-func (ms *GossipCluster) joinMembers(clusterNodes []string) {
-	n, err := ms.memberList.Join(clusterNodes)
+func (gc *Cluster) addMember(node *corev1.Node) {
+	gc.memberRWLock.Lock()
+	defer gc.memberRWLock.Unlock()
+	nodeAddr, err := k8s.GetNodeAddr(node)
 	if err != nil {
-		klog.Errorf("Failed to join cluster: %s, cluster nodes: %#v", err.Error(), clusterNodes)
+		klog.Errorf("Failed to obtain local IP address from K8s node: %w", err)
+		return
+	}
+	member := fmt.Sprintf("%s:%d", nodeAddr, gc.bindPort)
+	gc.existingMembers = append(gc.existingMembers, member)
+	gc.joinMembers(gc.existingMembers)
+}
+
+func (gc *Cluster) joinMembers(clusterNodes []string) {
+	n, err := gc.memberList.Join(clusterNodes)
+	if err != nil {
+		klog.Errorf("Failed to join cluster: %v, cluster nodes: %#v", err, clusterNodes)
+		return
 	}
 	klog.V(2).Infof("Join cluster: %v, cluster nodes: %+v", n, clusterNodes)
 }
 
-func (ms *GossipCluster) Run(stopCh <-chan struct{}) {
-	newClusterMembers := ms.convertListNodesToMemberlist()
+func (gc *Cluster) Run(stopCh <-chan struct{}) {
+	newClusterMembers := gc.convertListNodesToMemberlist()
 	expectNodeNum := len(newClusterMembers)
-	klog.V(3).Infof("List %d nodes: %#v", expectNodeNum, newClusterMembers)
 
-	actualMemberNum := ms.memberList.NumMembers()
-	klog.V(3).Infof("Nodes num: %d, member num: %d", expectNodeNum, actualMemberNum)
+	actualMemberNum := gc.memberList.NumMembers()
+	klog.V(3).Infof("Nodes num: %d, actual member num: %d", expectNodeNum, actualMemberNum)
 	if actualMemberNum < expectNodeNum {
-		ms.joinMembers(newClusterMembers)
+		gc.joinMembers(newClusterMembers)
 	}
 
-	// Ask for members of the cluster
-	for i, member := range ms.memberList.Members() {
-		klog.V(4).Infof("Member %d: %s, Address: %s, State: %#v", i, member.Name, member.Addr, member.State)
-	}
+	gc.askClusterMemberHealthz()
 
 	// Memberlist will maintain membership information in the background.
-	timeTicker := time.NewTicker(ms.defaultInterval)
+	timeTicker := time.NewTicker(gc.defaultClusterHealthzAskInterval)
+	defer func() {
+		timeTicker.Stop()
+		close(gc.nodeEventsCh)
+	}()
 	for {
 		select {
 		case <-stopCh:
 			return
+		case nodeEvent := <-gc.nodeEventsCh:
+			gc.updateNodeConsistenHash(&nodeEvent)
 		case <-timeTicker.C:
-			for i, member := range ms.memberList.Members() {
-				klog.V(5).Infof("Member %d: %s, Address: %s, State: %#v", i, member.Name, member.Addr, member.State)
-			}
+			gc.askClusterMemberHealthz()
 		}
 	}
+}
+
+func (gc *Cluster) askClusterMemberHealthz() {
+	for i, member := range gc.memberList.Members() {
+		klog.V(0).Infof("Cluster member %d: %s, Address: %s, State: %#v",
+			i, member.Name, member.Addr, member.State)
+	}
+}
+
+func (gc *Cluster) updateNodeConsistenHash(nodeEvent *memberlist.NodeEvent) {
+	gc.memberRWLock.Lock()
+	defer gc.memberRWLock.Unlock()
+	switch node, event := nodeEvent.Node, nodeEvent.Event; event {
+	case memberlist.NodeJoin:
+		klog.V(0).Infof("Node event: join node (%s)", node.String())
+		gc.conHash.Add(node.Name)
+		gc.notify(node.Name, true)
+	case memberlist.NodeLeave:
+		klog.V(0).Infof("Node event: leave node (%s)", node.String())
+		gc.conHash = newNodeConsistentHashMap()
+		gc.conHash.Add(gc.nodesList()...)
+		gc.notify(node.Name, false)
+	default:
+		klog.V(0).Infof("Node event: update node (%s)", node.String())
+	}
+}
+
+func (gc *Cluster) nodesList() []string {
+	aliveMembers := gc.memberList.Members()
+	nodes := make([]string, len(aliveMembers))
+	for i, node := range aliveMembers {
+		nodes[i] = node.Name
+	}
+	return nodes
+}
+
+func (gc *Cluster) ShouldSelect(name string) bool {
+	myNode := gc.NodeConfig.Name
+	hitted := hitNodeByConsistentHash(gc.conHash, name, myNode)
+	klog.V(0).Infof("Assign egress (%s) owner node for local node (%s): %t", name, myNode, hitted)
+	return hitted
+}
+
+func hitNodeByConsistentHash(conHash *consistenthash.Map, name, myNode string) bool {
+	return conHash.Get(name) == myNode
+}
+
+func (gc *Cluster) notify(nodeName string, join bool) {
+	for _, handler := range gc.ClusterNodeEventHandlers {
+		handler(nodeName, join)
+	}
+}
+
+func (gc *Cluster) AddEventHandler(handler clusterNodeEventHandler) {
+	gc.ClusterNodeEventHandlers = append(gc.ClusterNodeEventHandlers, handler)
 }

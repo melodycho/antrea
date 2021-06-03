@@ -193,8 +193,8 @@ func (o *Options) setDefaults() {
 		o.config.APIPort = apis.AntreaAgentAPIPort
 	}
 
-	if o.config.GossipClusterPort == 0 {
-		o.config.GossipClusterPort = apis.AntreaAgentGossipClusterPort
+	if o.config.ClusterPort == 0 {
+		o.config.ClusterPort = apis.AntreaAgentClusterPort
 	}
 
 	if features.DefaultFeatureGate.Enabled(features.FlowExporter) {

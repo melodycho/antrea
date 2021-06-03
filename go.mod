@@ -3,6 +3,7 @@ module antrea.io/antrea
 go 1.15
 
 require (
+	bou.ke/monkey v1.0.2
 	github.com/Mellanox/sriovnet v1.0.2
 	github.com/Microsoft/go-winio v0.4.16-0.20201130162521-d1ffc52c7331
 	github.com/Microsoft/hcsshim v0.8.9
@@ -23,6 +24,7 @@ require (
 	github.com/elazarl/goproxy v0.0.0-20190911111923-ecfe977594f1 // indirect
 	github.com/go-openapi/spec v0.19.5
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.0
 	github.com/google/uuid v1.1.2
