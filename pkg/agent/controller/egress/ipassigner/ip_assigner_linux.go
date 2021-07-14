@@ -149,7 +149,7 @@ func (a *ipAssigner) AssignIP(ip string) error {
 		if err := ndp.NeighborAdvertisement(netIP, a.externalInterface); err != nil {
 			return fmt.Errorf("failed to send neighbor advertisement: %v", err)
 		}
-		klog.V(2).InfoS("Sent NDP neighbor advertisement", "ip", parsedIP)
+		klog.InfoS("Sent NDP neighbor advertisement", "ip", parsedIP)
 	}
 	return nil
 }

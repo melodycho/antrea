@@ -13,3 +13,53 @@
 // limitations under the License.
 
 package ndp
+
+import (
+	"fmt"
+	"net"
+	"reflect"
+	"testing"
+)
+
+func TestAdvertiserMarshalMessage(t *testing.T) {
+	tests := []struct {
+		name         string
+		ipv6Addr     string
+		hardwareAddr net.HardwareAddr
+		want         []byte
+	}{
+		{
+			name:         "NDP neighbor advertise marshalMessage",
+			ipv6Addr:     "fe80::250:56ff:fea7:e29d",
+			hardwareAddr: net.HardwareAddr{0x00, 0x50, 0x56, 0xa7, 0xe2, 0x9d},
+			want: []byte{
+				0x88, 0x0, 0x0, 0x0, 0x20, 0x0, 0x0, 0x0,
+				0xfe, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+				0x2, 0x50, 0x56, 0xff, 0xfe, 0xa7, 0xe2, 0x9d,
+				0x2, 0x1, 0x0, 0x50, 0x56, 0xa7, 0xe2, 0x9d,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, err := func(ipv6Str string, addr net.HardwareAddr) (b []byte, err error) {
+				ip, err := MustIPv6(ipv6Str)
+				if err != nil {
+					return
+				}
+				b, err = newNDPNeighborAdvertisementMessage(ip, addr)
+				return
+			}(tt.ipv6Addr, tt.hardwareAddr); err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("NDPmarshalMessage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func MustIPv6(s string) (net.IP, error) {
+	ip := net.ParseIP(s)
+	if err := checkIPv6(ip); err != nil {
+		return nil, fmt.Errorf("invalid IPv6 address: %q", err)
+	}
+	return ip, nil
+}
