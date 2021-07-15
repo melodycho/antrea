@@ -15,7 +15,9 @@
 package agent
 
 import (
+	"fmt"
 	"net"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,11 +43,17 @@ func TestIPAssigner(t *testing.T) {
 
 	ip1 := "10.10.10.10"
 	ip2 := "10.10.10.11"
-	desiredIPs := sets.NewString(ip1, ip2)
+	ip3 := "2621:124:6020:1006:250:56ff:fea7:36c2"
+	desiredIPs := sets.NewString(ip1, ip2, ip3)
 
 	for ip := range desiredIPs {
-		err = ipAssigner.AssignIP(ip)
-		assert.NoError(t, err, "Failed to assign a valid IP")
+		errAssign := ipAssigner.AssignIP(ip)
+		cmd := exec.Command("ip", "addr")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("List ip addr error: %v", err)
+		}
+		assert.NoError(t, errAssign, fmt.Sprintf("Failed to assign a valid IP, ip addrs: %s", string(out)))
 	}
 
 	assert.Equal(t, desiredIPs, ipAssigner.AssignedIPs(), "Assigned IPs don't match")
