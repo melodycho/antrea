@@ -584,9 +584,6 @@ func (c *EgressController) syncEgress(egressName string) error {
 		if err := c.ipAssigner.AssignIP(egress.Spec.EgressIP); err != nil {
 			return err
 		}
-		if err := c.updateEgressStatus(egress, c.nodeName); err != nil {
-			return err
-		}
 	} else {
 		// Unassign the Egress IP from the local Node if it was assigned by the agent.
 		if err := c.ipAssigner.UnassignIP(egress.Spec.EgressIP); err != nil {
@@ -608,6 +605,12 @@ func (c *EgressController) syncEgress(egressName string) error {
 			return err
 		}
 		eState.mark = mark
+	}
+
+	if c.localIPDetector.IsLocalIP(egress.Spec.EgressIP) {
+		if err := c.updateEgressStatus(egress, c.nodeName); err != nil {
+			return err
+		}
 	}
 
 	// Copy the previous ofPorts and Pods. They will be used to identify stale ofPorts and Pods.

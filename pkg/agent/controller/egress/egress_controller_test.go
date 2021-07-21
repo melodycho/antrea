@@ -470,6 +470,11 @@ func TestSyncEgress(t *testing.T) {
 			// Call it one more time to ensure it's idempotent, no extra datapath calls are supposed to be made.
 			err = c.syncEgress(tt.newEgress.Name)
 			assert.NoError(t, err)
+			egress, err := c.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), tt.newEgress.Name, metav1.GetOptions{})
+			assert.NoError(t, err)
+			if tt.newLocalIPs.Has(egress.Spec.EgressIP) {
+				assert.Equal(t, c.nodeName, egress.Status.EgressNode, "Egress status not match")
+			}
 		})
 	}
 }

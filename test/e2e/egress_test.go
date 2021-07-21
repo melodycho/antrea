@@ -167,6 +167,8 @@ ip netns exec %[1]s /agnhost netexec
 	defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
 	assertClientIP(localPod, egressNodeIP)
 	assertClientIP(remotePod, egressNodeIP)
+	egressState, _ := data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
+	assert.Equal(t, egressNode, egressState.Status.EgressNode, "Egress status not match")
 
 	t.Log("Updating the Egress's AppliedTo to remotePod only")
 	egress.Spec.AppliedTo = v1alpha2.AppliedTo{
@@ -341,7 +343,7 @@ func testEgressUpdateEgressIP(t *testing.T, data *TestData) {
 			toUpdate.Spec.ExternalIPPool = newPool.Name
 			toUpdate.Spec.EgressIP = newIP
 			egress, err = data.crdClient.CrdV1alpha2().Egresses().Update(context.TODO(), toUpdate, metav1.UpdateOptions{})
-			require.NoError(t, err, "Failed to delete Egress")
+			require.NoError(t, err, "Failed to update Egress")
 
 			_, err = data.checkEgressState(egress.Name, newIP, tt.newNode, "", time.Second)
 			require.NoError(t, err)
