@@ -38,7 +38,6 @@ import (
 	cpv1b2 "antrea.io/antrea/pkg/apis/controlplane/v1beta2"
 	crdv1a2 "antrea.io/antrea/pkg/apis/crd/v1alpha2"
 	"antrea.io/antrea/pkg/client/clientset/versioned"
-	"antrea.io/antrea/pkg/client/clientset/versioned/fake"
 	fakeversioned "antrea.io/antrea/pkg/client/clientset/versioned/fake"
 	crdinformers "antrea.io/antrea/pkg/client/informers/externalversions"
 	"antrea.io/antrea/pkg/util/k8s"
@@ -98,7 +97,7 @@ func newFakeController(t *testing.T, initObjects []runtime.Object) *fakeControll
 	mockRouteClient := routetest.NewMockInterface(controller)
 	mockIPAssigner := ipassignertest.NewMockIPAssigner(controller)
 
-	clientset := &fake.Clientset{}
+	clientset := &fakeversioned.Clientset{}
 	crdClient := fakeversioned.NewSimpleClientset(initObjects...)
 	crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, 0)
 	egressInformer := crdInformerFactory.Crd().V1alpha2().Egresses()
@@ -114,6 +113,7 @@ func newFakeController(t *testing.T, initObjects []runtime.Object) *fakeControll
 	egressController := &EgressController{
 		ofClient:             mockOFClient,
 		routeClient:          mockRouteClient,
+		crdClient:            crdClient,
 		antreaClientProvider: &antreaClientGetter{clientset},
 		egressInformer:       egressInformer.Informer(),
 		egressLister:         egressInformer.Lister(),
