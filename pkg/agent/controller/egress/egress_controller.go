@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -521,17 +522,29 @@ func (c *EgressController) unbindPodEgress(pod, egress string) (string, bool) {
 	return "", false
 }
 
-func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, nodeName string) error {
-	if egress.Status.EgressNode == nodeName {
-		return nil
+func (c *EgressController) updateEgressStatus(egressName, nodeName string) error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		egress, err := c.egressLister.Get(egressName)
+		if err != nil {
+			return err
+		}
+		actualStatus := egress.Status.EgressNode
+		// There is no need to handle if actual Egress status(actualStatus) equals to the expected Egress status(nodeName),
+		// or expected Egress status(nodeName) is "" but the latest Egress status is not the local Node itself.
+		// That is to say, we only need to update Egress status to localNode itself when the Egress IP is local Node IP
+		// or update Egress current status from localNode(itself) to ""(Egress IP unassigned from local Node, in order to avoid a stale nodeName in Egress status).
+		if actualStatus == nodeName || (nodeName == "" && actualStatus != c.nodeName) {
+			return nil
+		}
+		klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name, "oldNode", egress.Status.EgressNode, "newNode", nodeName)
+		toUpdate := egress.DeepCopy()
+		toUpdate.Status.EgressNode = nodeName
+		_, err = c.crdClient.CrdV1alpha2().Egresses().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
+		return err
+	}); err != nil {
+		return fmt.Errorf("updating Egress %s status error: %v", egressName, err)
 	}
-	klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name, "oldNode", egress.Status.EgressNode, "newNode", nodeName)
-	toUpdate := egress.DeepCopy()
-	toUpdate.Status.EgressNode = nodeName
-	if _, err := c.crdClient.CrdV1alpha2().Egresses().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("updating Egress %s status error: %v", egress.Name, err)
-	}
-	klog.V(2).InfoS("Updated Egress status", "Egress", egress.Name)
+	klog.V(2).InfoS("Updated Egress status", "Egress", egressName)
 	metrics.AntreaEgressStatusUpdates.Inc()
 	return nil
 }
@@ -584,9 +597,6 @@ func (c *EgressController) syncEgress(egressName string) error {
 		if err := c.ipAssigner.AssignIP(egress.Spec.EgressIP); err != nil {
 			return err
 		}
-		if err := c.updateEgressStatus(egress, c.nodeName); err != nil {
-			return err
-		}
 	} else {
 		// Unassign the Egress IP from the local Node if it was assigned by the agent.
 		if err := c.ipAssigner.UnassignIP(egress.Spec.EgressIP); err != nil {
@@ -608,6 +618,16 @@ func (c *EgressController) syncEgress(egressName string) error {
 			return err
 		}
 		eState.mark = mark
+	}
+
+	if c.localIPDetector.IsLocalIP(egress.Spec.EgressIP) {
+		if err := c.updateEgressStatus(egress.Name, c.nodeName); err != nil {
+			return err
+		}
+	} else if egress.Status.EgressNode == c.nodeName {
+		if err := c.updateEgressStatus(egress.Name, ""); err != nil {
+			return err
+		}
 	}
 
 	// Copy the previous ofPorts and Pods. They will be used to identify stale ofPorts and Pods.
