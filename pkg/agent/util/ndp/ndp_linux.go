@@ -24,7 +24,7 @@ import (
 
 const (
 	// Option Length, 8-bit unsigned integer. The length of the option (including the type and length fields) in units of 8 octets.
-	// The value 0 is invalid. Nodes MUST silently discard an ND packet that contains an option with length zero.
+	// The value 0 is invalid. Nodes MUST silently discard a ND packet that contains an option with length zero.
 	// https://datatracker.ietf.org/doc/html/rfc4861
 	ndpOptionLen = 1
 
@@ -52,7 +52,7 @@ func checkIPv6(ip net.IP) error {
 	return nil
 }
 
-// NeighborAdvertisement sends an NDP Neighbor Advertisement over interface 'iface' from 'srcIP'.
+// NeighborAdvertisement sends a NDP Neighbor Advertisement over interface 'iface' from 'srcIP'.
 func NeighborAdvertisement(srcIP net.IP, iface *net.Interface) error {
 	if err := checkIPv6(srcIP); err != nil {
 		return err
@@ -63,7 +63,7 @@ func NeighborAdvertisement(srcIP net.IP, iface *net.Interface) error {
 		return fmt.Errorf("interface address error: %v", err)
 	}
 
-	ipAddr := &net.IPAddr{}
+	var ipAddr *net.IPAddr
 
 	for _, a := range addrs {
 		ipn, ok := a.(*net.IPNet)
@@ -96,14 +96,13 @@ func NeighborAdvertisement(srcIP net.IP, iface *net.Interface) error {
 	if err := pc.SetMulticastHopLimit(hopLimit); err != nil {
 		return fmt.Errorf("ipv6 conn set multicast hoplimit error: %v", err)
 	}
-
 	// Calculate and place ICMPv6 checksum at correct offset in all messages.
 	const chkOff = 2
 	if err := pc.SetChecksum(true, chkOff); err != nil {
 		return fmt.Errorf("ipv6 conn set checksum error: %v", err)
 	}
-
 	defer pc.Close()
+
 	mb, err := newNDPNeighborAdvertisementMessage(srcIP, iface.HardwareAddr)
 	if err != nil {
 		return fmt.Errorf("new NDP Neighbor Advertisement Message error: %v", err)
@@ -129,21 +128,13 @@ func newNDPNeighborAdvertisementMessage(targetAddress net.IP, hwa net.HardwareAd
 	naMsgBytes[0] |= 1 << 5
 	copy(naMsgBytes[4:], targetAddress)
 
-	marshall := func() ([]byte, error) {
-		if 1+1+len(hwa) != int(ndpOptionLen*8) {
-			return nil, fmt.Errorf("hardwareAddr length error: %s", hwa)
-		}
-		b := make([]byte, ndpOptionLen*8)
-		b[0] = ndpOptionType
-		b[1] = ndpOptionLen
-		copy(b[2:], hwa)
-		return b, nil
+	if 1+1+len(hwa) != int(ndpOptionLen*8) {
+		return nil, fmt.Errorf("hardwareAddr length error: %s", hwa)
 	}
-
-	optionsBytes, err := marshall()
-	if err != nil {
-		return nil, err
-	}
+	optionsBytes := make([]byte, ndpOptionLen*8)
+	optionsBytes[0] = ndpOptionType
+	optionsBytes[1] = ndpOptionLen
+	copy(optionsBytes[2:], hwa)
 	naMsgBytes = append(naMsgBytes, optionsBytes...)
 
 	im := icmp.Message{
