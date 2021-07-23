@@ -474,6 +474,8 @@ func TestSyncEgress(t *testing.T) {
 			assert.NoError(t, err)
 			if tt.newLocalIPs.Has(egress.Spec.EgressIP) {
 				assert.Equal(t, c.nodeName, egress.Status.EgressNode, "Egress status not match")
+			} else {
+				assert.Equal(t, "", egress.Status.EgressNode, "Egress status not match")
 			}
 		})
 	}

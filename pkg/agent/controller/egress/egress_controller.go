@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -521,17 +522,27 @@ func (c *EgressController) unbindPodEgress(pod, egress string) (string, bool) {
 	return "", false
 }
 
-func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, nodeName string) error {
-	if egress.Status.EgressNode == nodeName {
+func (c *EgressController) updateEgressStatus(egressName, nodeName string) error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		egress, err := c.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egressName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		actualStatus := egress.Status.EgressNode
+		if actualStatus == nodeName || (nodeName == "" && actualStatus != c.nodeName) {
+			return nil
+		}
+		klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name, "oldNode", egress.Status.EgressNode, "newNode", nodeName)
+		toUpdate := egress.DeepCopy()
+		toUpdate.Status.EgressNode = nodeName
+		if _, err := c.crdClient.CrdV1alpha2().Egresses().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
 		return nil
+	}); err != nil {
+		return fmt.Errorf("updating Egress %s status error: %v", egressName, err)
 	}
-	klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name, "oldNode", egress.Status.EgressNode, "newNode", nodeName)
-	toUpdate := egress.DeepCopy()
-	toUpdate.Status.EgressNode = nodeName
-	if _, err := c.crdClient.CrdV1alpha2().Egresses().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("updating Egress %s status error: %v", egress.Name, err)
-	}
-	klog.V(2).InfoS("Updated Egress status", "Egress", egress.Name)
+	klog.V(2).InfoS("Updated Egress status", "Egress", egressName)
 	metrics.AntreaEgressStatusUpdates.Inc()
 	return nil
 }
@@ -608,7 +619,11 @@ func (c *EgressController) syncEgress(egressName string) error {
 	}
 
 	if c.localIPDetector.IsLocalIP(egress.Spec.EgressIP) {
-		if err := c.updateEgressStatus(egress, c.nodeName); err != nil {
+		if err := c.updateEgressStatus(egress.Name, c.nodeName); err != nil {
+			return err
+		}
+	} else if egress.Status.EgressNode == c.nodeName {
+		if err := c.updateEgressStatus(egress.Name, ""); err != nil {
 			return err
 		}
 	}

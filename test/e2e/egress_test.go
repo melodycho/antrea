@@ -170,13 +170,25 @@ ip netns exec %[1]s /agnhost netexec
 	egressState, _ := data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
 	assert.Equal(t, egressNode, egressState.Status.EgressNode, "Egress status not match")
 
+	err := wait.Poll(time.Millisecond*100, time.Second, func() (bool, error) {
+		egress, err := data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return egress.Status.EgressNode == egressNode, nil
+	})
+	assert.NoError(t, err, "Egress failed to reach expected status")
+
+	egress, err = data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
+	assert.NoError(t, err, "Failed to get Egress")
+
 	t.Log("Updating the Egress's AppliedTo to remotePod only")
 	egress.Spec.AppliedTo = v1alpha2.AppliedTo{
 		PodSelector: &metav1.LabelSelector{
 			MatchLabels: map[string]string{"antrea-e2e": remotePod},
 		},
 	}
-	egress, err := data.crdClient.CrdV1alpha2().Egresses().Update(context.TODO(), egress, metav1.UpdateOptions{})
+	egress, err = data.crdClient.CrdV1alpha2().Egresses().Update(context.TODO(), egress, metav1.UpdateOptions{})
 	if err != nil {
 		t.Fatalf("Failed to update Egress %v: %v", egress, err)
 	}
