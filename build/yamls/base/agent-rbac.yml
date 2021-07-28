@@ -153,6 +153,7 @@ rules:
       - crd.antrea.io
     resources:
       - egresses/status
+      - externalippools/status
     verbs:
       - update
   - apiGroups:

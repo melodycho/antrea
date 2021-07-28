@@ -177,6 +177,27 @@ spec:
                       type: array
                     matchLabels:
                       x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              required:
+                - ipAddress
+                - state
+                - resource
+              properties:
+                ipAddress:
+                  type: string
+                  oneOf:
+                    - format: ipv4
+                    - format: ipv6
+                state:
+                  enum:
+                    - Allocated
+                    - Preallocated
+                  type: string
+                resource:
+                  type: string
+      subresources:
+        status: {}
   scope: Cluster
   names:
     plural: externalippools
