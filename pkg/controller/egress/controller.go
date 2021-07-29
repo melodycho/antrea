@@ -15,10 +15,12 @@
 package egress
 
 import (
+	"antrea.io/antrea/pkg/controller/metrics"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"k8s.io/client-go/util/retry"
 	"net"
 	"reflect"
 	"sync"
@@ -199,6 +201,9 @@ func (c *EgressController) updateIPAllocation(egress *egressv1alpha2.Egress) {
 	}
 	// Record the valid IP allocation.
 	c.setIPAllocation(egress.Name, ip, egress.Spec.ExternalIPPool)
+	if err := c.updateExternalIPPoolStatus(egress.Spec.ExternalIPPool, ip.String(), egress); err != nil {
+		klog.ErrorS(err, "Update ExternalIPPool status error", "externalIPPool", egress.Spec.ExternalIPPool)
+	}
 	klog.InfoS("Allocated EgressIP", "egress", egress.Name, "ip", egress.Spec.EgressIP, "pool", egress.Spec.ExternalIPPool)
 }
 
@@ -311,6 +316,36 @@ func (c *EgressController) setIPAllocation(egressName string, ip net.IP, poolNam
 	}
 }
 
+func (c *EgressController) updateExternalIPPoolStatus(poolName, ip string, egress *egressv1alpha2.Egress) error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		eip, err := c.externalIPPoolLister.Get(poolName)
+		if err != nil {
+			return err
+		}
+		state := "PreAllocated"
+		if egress.Status.EgressNode != "" {
+			state = "Allocated"
+		}
+		actualStatus := eip.Status.Usage
+		usage := egressv1alpha2.ExternalIPPoolUsage{State: state, IPAddress: ip, Resource: poolName}
+		for _, status := range actualStatus {
+			if usage == status {
+				return nil
+			}
+		}
+		klog.InfoS("Updating ExternalIPPool status", "ExternalIPPool", poolName, "ip", ip, "egressName", egress.Name)
+		toUpdate := eip.DeepCopy()
+		toUpdate.Status.Usage = append(toUpdate.Status.Usage, usage)
+		_, err = c.crdClient.CrdV1alpha2().ExternalIPPools().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
+		return err
+	}); err != nil {
+		return fmt.Errorf("updating ExternalIPPool %s status error: %v", poolName, err)
+	}
+	klog.InfoS("Updated ExternalIPPool status", "ExternalIPPool", poolName)
+	metrics.AntreaExternalIPPoolStatusUpdates.Inc()
+	return nil
+}
+
 // syncEgressIP is responsible for releasing stale EgressIP and allocating new EgressIP for an Egress if applicable.
 func (c *EgressController) syncEgressIP(egress *egressv1alpha2.Egress) (net.IP, error) {
 	prevIP, prevIPPool, exists := c.getIPAllocation(egress.Name)
@@ -361,6 +396,9 @@ func (c *EgressController) syncEgressIP(egress *egressv1alpha2.Egress) (net.IP, 
 		}
 	}
 	c.setIPAllocation(egress.Name, ip, egress.Spec.ExternalIPPool)
+	if err := c.updateExternalIPPoolStatus(egress.Spec.ExternalIPPool, ip.String(), egress); err != nil {
+		klog.ErrorS(err, "Update ExternalIPPool status error", "externalIPPool", egress.Spec.ExternalIPPool)
+	}
 	klog.InfoS("Allocated EgressIP", "egress", egress.Name, "ip", ip, "pool", egress.Spec.ExternalIPPool)
 	return ip, nil
 }

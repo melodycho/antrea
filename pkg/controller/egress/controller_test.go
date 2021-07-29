@@ -338,6 +338,21 @@ func TestAddEgress(t *testing.T) {
 			gotEgress, err := controller.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), tt.inputEgress.Name, metav1.GetOptions{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedEgressIP, gotEgress.Spec.EgressIP)
+			if gotEgress.Spec.ExternalIPPool != "" && gotEgress.Spec.EgressIP != "" {
+				poolName := gotEgress.Spec.ExternalIPPool
+				eip, err := controller.crdClient.CrdV1alpha2().ExternalIPPools().Get(context.TODO(), poolName, metav1.GetOptions{})
+				assert.NoError(t, err)
+				usages := eip.Status.Usage
+				checkUsage := func() bool {
+					for _, usage := range usages {
+						if usage.IPAddress == gotEgress.Spec.EgressIP {
+							return true
+						}
+					}
+					return false
+				}
+				assert.Equal(t, true, checkUsage, "ExternalIPPool status not match")
+			}
 		})
 	}
 }
@@ -679,6 +694,21 @@ func TestSyncEgressIP(t *testing.T) {
 			}
 			assert.Equal(t, net.ParseIP(tt.expectedEgressIP), gotEgressIP)
 			checkExternalIPPoolUsed(t, controller, tt.existingExternalIPPool.Name, tt.expectedExternalIPPoolUsed)
+			// if gotEgressIP != nil {
+			// 	poolName := gotEgress.Spec.ExternalIPPool
+			// 	eip, err := controller.crdClient.CrdV1alpha2().ExternalIPPools().Get(context.TODO(), poolName, metav1.GetOptions{})
+			// 	assert.NoError(t, err)
+			// 	usages := eip.Status.Usage
+			// 	checkUsage := func() bool {
+			// 		for _, usage := range usages {
+			// 			if usage.IPAddress == gotEgress.Spec.EgressIP {
+			// 				return true
+			// 			}
+			// 		}
+			// 		return false
+			// 	}
+			// 	assert.Equal(t, true, checkUsage, "ExternalIPPool status not match")
+			// }
 		})
 	}
 }
