@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/antctl/runtime"
 	"antrea.io/antrea/test/scale/utils"
@@ -38,7 +38,7 @@ import (
 
 const (
 	// PodsPerNode defines average Pod number on each node (include simulate nodes).
-	PodsPerNode = 30
+	PodsPerNode = 1
 	// ScaleTestNamespace is the Namespace of the scale test resources.
 	ScaleTestNamespace = "antrea-scale-test-ns"
 
@@ -65,6 +65,7 @@ const (
 )
 
 var (
+	// LabelCandidates ...
 	// label number:              1   2   3   4   5   6   7   8   9   10  11 12
 	// pods cover percents:       80% 64% 51% 41% 32% 25% 20% 16% 13% 10% 8% 6%
 	LabelCandidates = []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
@@ -88,7 +89,7 @@ var (
 		},
 	}
 
-	// RealNodeAffinity is used to make a Pod to be scheduled to a simulate node.
+	// SimulateAffinity is used to make a Pod to be scheduled to a simulate node.
 	SimulateAffinity = corev1.Affinity{
 		NodeAffinity: &corev1.NodeAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
@@ -271,7 +272,10 @@ func NewTestData(ctx context.Context) (TestData, error) {
 	if len(ip) == 0 {
 		return nil, fmt.Errorf("error when getting prometheus service: ClusterIP is empty")
 	}
+
 	promURL := &url.URL{Scheme: "http", Host: net.JoinHostPort(ip, prometheusPort)}
+	klog.Infof(".....................................................................")
+	klog.InfoS("", "promURL", promURL)
 	promClient, err := promapi.NewClient(promapi.Config{Address: promURL.String()})
 	if err != nil {
 		return nil, fmt.Errorf("error when creating prometheus client: %w", err)
@@ -325,12 +329,12 @@ func NewTestData(ctx context.Context) (TestData, error) {
 		return nil, err
 	}
 
-	klog.Infof("Preflight checks and clean up: restart prometheus server")
-	if err := kClient.CoreV1().
-		Pods(prometheusNamespace).
-		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=prometheus-server"}); err != nil {
-		klog.Errorf("Error when stopping prometheus server: %v", err)
-	}
+	// klog.Infof("Preflight checks and clean up: restart prometheus server")
+	// if err := kClient.CoreV1().
+	// 	Pods(prometheusNamespace).
+	// 	DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=prometheus-server"}); err != nil {
+	// 	klog.Errorf("Error when stopping prometheus server: %v", err)
+	// }
 	func() {
 		ctx, cancelFunc := context.WithTimeout(ctx, time.Minute)
 		defer cancelFunc()
@@ -350,10 +354,7 @@ func NewTestData(ctx context.Context) (TestData, error) {
 	time.Sleep(2 * 5 * time.Second)
 
 	klog.Infof("Creating scale test namespaces")
-	_, err = kClient.
-		CoreV1().Namespaces().
-		Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ScaleTestNamespace}}, metav1.CreateOptions{})
-	if err != nil {
+	if _, err := kClient.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ScaleTestNamespace}}, metav1.CreateOptions{}); err != nil {
 		return nil, err
 	}
 

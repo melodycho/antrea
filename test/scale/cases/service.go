@@ -26,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/scale/types"
 	"antrea.io/antrea/test/scale/utils"
@@ -34,7 +34,7 @@ import (
 
 // serviceNum calculates the expected Service numbers based on the Node number.
 func serviceNum(nodeNum int) int {
-	return nodeNum * 20
+	return nodeNum * 1
 }
 
 func generateService() *corev1.Service {
@@ -58,7 +58,7 @@ func TestCaseServiceChurns(isIPv6 bool) TestCase {
 	var svcs []*corev1.Service
 	agentDeletedCh := make(chan struct{})
 
-	return repeat("Repeat", 3,
+	return repeat("Repeat", 1,
 		chain("Service churn test",
 			do("Create test services", func(ctx Context, data TestData) error {
 				svcs = nil
@@ -88,10 +88,11 @@ func TestCaseServiceChurns(isIPv6 bool) TestCase {
 				return nil
 			}),
 			do("Check readiness of each test service", func(ctx Context, data TestData) error {
+				time.Sleep(time.Minute)
 				gErr, ctx := errgroup.WithContext(ctx)
 				for i := range data.TestClientPods() {
 					clientPod := data.TestClientPods()[i]
-					klog.Infof("Running client Pod: %s", clientPod.Name)
+					klog.InfoS("Running client Pod", "PodName", clientPod.Name)
 					gErr.Go(func() error {
 						readySvcs := make(map[string]struct{})
 						return utils.DefaultRetry(func() error {
@@ -112,9 +113,11 @@ func TestCaseServiceChurns(isIPv6 bool) TestCase {
 									if err = utils.DefaultRetry(func() error {
 										var stdout, stderr bytes.Buffer
 										if err := executor.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
-											klog.Warningf("Error when executing commands on service client Pod %s: %v, stdout:\n`%s`, stderr:\n`%s`", clientPod.Name, err, stdout.String(), stderr.String())
-											return fmt.Errorf("error when executing commands on service client Pod: %w, stdout:\n`%s`, stderr:\n`%s`", err, stdout.String(), stderr.String())
+											err := fmt.Errorf("executing commands on service client Pod error: %v", err)
+											klog.ErrorS(err, "Check readiness of service", "ServiceName", svc.Name, "ClientPodName", clientPod.Name, "stdout", stdout.String(), "stderr", stderr.String())
+											return fmt.Errorf("check readiness of service error: %v, stdout:`%s`, stderr:`%s`", err, stdout.String(), stderr.String())
 										}
+										klog.InfoS("Executed commands on service client Pod", "stdout", stdout.String(), "stderr", stderr.String())
 										readySvcs[svcKey] = struct{}{}
 										return nil
 									}); err != nil {
@@ -170,7 +173,7 @@ func TestCaseServiceChurns(isIPv6 bool) TestCase {
 				gErr, _ := errgroup.WithContext(ctx)
 				for i := range data.TestClientPods() {
 					clientPod := data.TestClientPods()[i]
-					klog.Infof("Running client Pod: %s", clientPod.Name)
+					klog.InfoS("Running client Pod", "PodName", clientPod.Name)
 					gErr.Go(func() error {
 						for _, svc := range svcs {
 							executor, err := remotecommand.NewSPDYExecutor(data.Kubeconfig(), "POST", execURL(&clientPod, data.KubernetesClientSet(), svc.Spec.ClusterIP))
@@ -179,8 +182,9 @@ func TestCaseServiceChurns(isIPv6 bool) TestCase {
 							}
 							var stdout, stderr bytes.Buffer
 							if err := executor.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
-								klog.Warningf("Error when executing commands on service client Pod: %v, stdout:\n`%s`, stderr:\n`%s`", err, stdout.String(), stderr.String())
-								return fmt.Errorf("error when executing commands on service client Pod: %w, stdout:\n`%s`, stderr:\n`%s`", err, stdout.String(), stderr.String())
+								err = fmt.Errorf("executing commands on service client Pod error: %v", err)
+								klog.ErrorS(err, "Check readiness of service", "ServiceName", svc.Name, "ClientPodName", clientPod.Name, "stdout", stdout.String(), "stderr", stderr.String())
+								return fmt.Errorf("check readiness of service error: %v, stdout:`%s`, stderr:`%s`", err, stdout.String(), stderr.String())
 							}
 						}
 						return nil

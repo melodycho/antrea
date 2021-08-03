@@ -16,9 +16,10 @@ package types
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/sync/errgroup"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 func NewFan(name string) *Fan {
@@ -43,8 +44,14 @@ func (f *Fan) Includes(testCases ...TestCase) TestCase {
 
 func (f *Fan) Run(ctx context.Context, testData TestData) error {
 	ctx = wrapWithBreadcrumb(ctx, f.name)
-	klog.Infof("Begin: %s", ctx.Value(CtxBreadcrumbs).(string))
-	defer klog.Infof("Finish: %s", ctx.Value(CtxBreadcrumbs).(string))
+
+	startTime := time.Now()
+	caseName := ctx.Value(CtxBreadcrumbs).(string)
+	klog.InfoS("Testing------>>>>>>>>>>>>>>>>>>>>>>>>>>>>", "Name", caseName)
+	defer func() {
+		klog.InfoS("Tested------->>>>>>>>>>>>>>>>>>>>>>>>>>>>", "Name", caseName)
+		klog.V(2).InfoS("Test time", "Name", caseName, "durationTime", time.Since(startTime))
+	}()
 
 	gErr, ctx := errgroup.WithContext(ctx)
 	for i := range f.testCases {

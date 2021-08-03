@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/scale/types"
 	"antrea.io/antrea/test/scale/utils"
@@ -44,8 +44,10 @@ var (
 	networkPolicyLabelKey = "antrea-scale-test-netpol"
 )
 
-func genRandInt(n int) int64 {
-	b := new(big.Int).SetInt64(int64(n))
+var errPrometheusClient = fmt.Errorf("PrometheusClient is nil")
+
+func genRandInt() int64 {
+	b := new(big.Int).SetInt64(int64(math.MaxInt64))
 	i, err := rand.Int(rand.Reader, b)
 	if err != nil {
 		return 0
@@ -55,8 +57,9 @@ func genRandInt(n int) int64 {
 
 func shuffle(s *[]corev1.Pod) {
 	slice := *s
+	n := len(slice)
 	for i := range slice {
-		j := genRandInt(i + 1)
+		j := int(genRandInt()) % n
 		slice[i], slice[j] = slice[j], slice[i]
 	}
 	*s = slice
@@ -139,16 +142,20 @@ func TestCaseNetworkPolicyRealization() TestCase {
 	}
 
 	times := 0
-	return repeat("Repeat", 4,
+	return repeat("Repeat", 1,
 		chain("NetworkPolicy process test",
 			do("Record number of processed NetworkPolicies in Antrea controller before running", func(ctx Context, data TestData) error {
 				times += 1
 				return wait.PollUntil(time.Second, func() (bool, error) {
 					promAPI := promv1.NewAPI(data.PrometheusClient())
+					if promAPI == nil {
+						klog.ErrorS(errPrometheusClient, "PrometheusClient", data.PrometheusClient())
+						return false, errPrometheusClient
+					}
 					err := utils.DefaultRetry(func() error {
 						result, _, err := promAPI.Query(ctx, "antrea_controller_network_policy_processed", time.Now())
 						if err != nil {
-							klog.Warningf("Failed to retrieve antrea_controller_network_policy_processed: %v", err)
+							klog.ErrorS(err, "Failed to retrieve antrea_controller_network_policy_processed")
 							return err
 						}
 						samples := result.(model.Vector) // Expected that there should only be one instance.
@@ -171,7 +178,7 @@ func TestCaseNetworkPolicyRealization() TestCase {
 					if err != nil {
 						return fmt.Errorf("error when generating network policies: %w", err)
 					}
-					klog.Infof("Going to process %d NetworkPolicies", len(nps))
+					klog.InfoS("Processing NetworkPolicies", "Num", len(nps))
 					for _, netpol := range nps {
 						if err := utils.DefaultRetry(func() error {
 							_, err := data.KubernetesClientSet().
@@ -187,6 +194,10 @@ func TestCaseNetworkPolicyRealization() TestCase {
 				}),
 				do("Waiting all NetworkPolicies to be processed", func(ctx Context, data TestData) error {
 					promAPI := promv1.NewAPI(data.PrometheusClient())
+					if promAPI == nil {
+						klog.ErrorS(errPrometheusClient, "PrometheusClient", data.PrometheusClient())
+						return errPrometheusClient
+					}
 					if err := utils.DefaultRetry(func() error {
 						return wait.PollImmediateUntil(time.Second, func() (bool, error) {
 							var processed int
@@ -214,10 +225,10 @@ func TestCaseNetworkPolicyRealization() TestCase {
 				gErr, _ := errgroup.WithContext(context.Background())
 				rateLimiter := rate.NewLimiter(rate.Limit(10*len(data.TestClientPods())), len(data.TestClientPods())*20)
 				for _, np := range nps {
-					if genRandInt(math.MaxInt64)%10 != 0 {
-						continue
-					}
-					klog.Infof("Checking isolation of the NetworkPolicy %s", np.Name)
+					// if genRandInt()%10 != 0 {
+					// 	continue
+					// }
+					klog.InfoS("Checking isolation of the NetworkPolicy", "NetworkPolicyName", np.Name)
 					podSelectors := make(map[string]string)
 					for k, v := range np.Spec.PodSelector.MatchLabels {
 						podSelectors[k] = v
@@ -230,22 +241,23 @@ func TestCaseNetworkPolicyRealization() TestCase {
 						return fmt.Errorf("error when selecting networkpolicy applied to pods: %w", err)
 					}
 					if len(podList.Items) == 0 {
-						klog.Infof("No Pod is selected by the NetworkPolicy %s, skip", np.Name)
+						klog.InfoS("No Pod is selected by the NetworkPolicy, skip", "NetworkPolicyName", np.Name)
+						return nil
 					}
 					var fromPods []corev1.Pod
 					var toPods []corev1.Pod
 					if len(np.Spec.Ingress) > 0 {
 						fromPods = data.TestClientPods()
-						toPods = []corev1.Pod{podList.Items[int(genRandInt(math.MaxInt64))%len(podList.Items)]}
+						toPods = []corev1.Pod{podList.Items[int(genRandInt())%len(podList.Items)]}
 					} else if len(np.Spec.Egress) > 0 {
-						fromPods = []corev1.Pod{podList.Items[int(genRandInt(math.MaxInt64))%len(podList.Items)]}
+						fromPods = []corev1.Pod{podList.Items[int(genRandInt())%len(podList.Items)]}
 						toPods = data.TestClientPods()
 					}
 					for i, fromPod := range fromPods {
 						for j, toPod := range toPods {
 							// goroutines will use the last process in the slice
 							tPod := &toPods[j]
-							klog.Infof("Checking isolation of the NetworkPolicy %s, from Pod %s to Pod %s", np.Name, fromPod.Name, toPod.Name)
+							klog.InfoS("Checking isolation of the NetworkPolicy", "NetworkPolicyName", np.Name, "FromPod", fromPod.Name, "ToPod", toPod.Name)
 							gErr.Go(func() error {
 								return retryWithRateLimiter(ctx, rateLimiter, func() error {
 									url := execURL(&fromPods[i], data.KubernetesClientSet(), tPod.Status.PodIP)
@@ -255,6 +267,7 @@ func TestCaseNetworkPolicyRealization() TestCase {
 									}
 									var stdout, stderr bytes.Buffer
 									if err := exec.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err == nil {
+										klog.InfoS("Check Pod connection ok", "FromPod", fromPod.Name, "toPod", toPod.Name, "output", stdout.String(), "outputErr", stderr.String())
 										return fmt.Errorf("the connection should not be success")
 									}
 									return nil
@@ -267,20 +280,29 @@ func TestCaseNetworkPolicyRealization() TestCase {
 			}),
 			do("Check connectivity of NetworkPolicies", func(ctx Context, data TestData) error {
 				for _, np := range nps {
-					klog.Infof("Checking connectivity of the NetworkPolicy %s", np.Name)
+					klog.InfoS("Checking connectivity of the NetworkPolicy", "NetworkPolicyName", np.Name)
 					podSelector := make(map[string]string)
 					for k, v := range np.Spec.PodSelector.MatchLabels {
 						podSelector[k] = v
 					}
 					podSelector[types.PodOnRealNodeLabelKey] = ""
+					// podList, err := data.KubernetesClientSet().CoreV1().
+					// 	Pods(types.ScaleTestNamespace).
+					// 	List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(&np.Spec.PodSelector)})
+					np.Spec.PodSelector.MatchLabels = podSelector
+					klog.InfoS("list PodSelector", "PodSelector", np.Spec.PodSelector)
 					podList, err := data.KubernetesClientSet().CoreV1().
 						Pods(types.ScaleTestNamespace).
 						List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(&np.Spec.PodSelector)})
 					if err != nil {
 						return fmt.Errorf("error when selecting networkpolicy applied to pods: %w", err)
 					}
+					klog.InfoS("list Pod", "podNum", len(podList.Items))
+					for _, pod := range podList.Items {
+						klog.InfoS("Pod", pod.Name)
+					}
 					if len(podList.Items) == 0 {
-						klog.Infof("No Pod is selected by the NetworkPolicy %s, skip", np.Name)
+						klog.InfoS("No Pod is selected by the NetworkPolicy, skip", "NetworkPolicyName", np.Name)
 					}
 					var fromPods []corev1.Pod
 					var toPods []corev1.Pod
@@ -315,18 +337,18 @@ func TestCaseNetworkPolicyRealization() TestCase {
 					}
 
 					if len(toPods) == 0 || len(fromPods) == 0 {
-						klog.Infof("Skipping the check of the NetworkPolicy: %s, since the label selector does not match any Pod", np.Name)
+						klog.InfoS("Skipping the check of the NetworkPolicy, since the label selector does not match any Pod", "NetworkPolicy", np.Name)
 						continue
 					}
 
-					toPod := toPods[int(genRandInt(math.MaxInt64))%len(toPods)]
-					fromPod := fromPods[int(genRandInt(math.MaxInt64))%len(fromPods)]
+					toPod := toPods[int(genRandInt())%len(toPods)]
+					fromPod := fromPods[int(genRandInt())%len(fromPods)]
 					rateLimiter := rate.NewLimiter(rate.Limit(10*len(data.TestClientPods())), len(data.TestClientPods())*20)
 					if toPod.Status.PodIP == "" {
-						klog.Errorf("Pod %s:%s does not have a valid IP", toPod.Namespace, toPod.Name)
+						klog.ErrorS(fmt.Errorf("nil Pod IP"), "Namespace", toPod.Namespace, "Name", toPod.Name)
 						continue
 					}
-					err = retryWithRateLimiter(ctx, rateLimiter, func() error {
+					if err := retryWithRateLimiter(ctx, rateLimiter, func() error {
 						exec, err := remotecommand.NewSPDYExecutor(
 							data.Kubeconfig(),
 							"POST",
@@ -337,11 +359,12 @@ func TestCaseNetworkPolicyRealization() TestCase {
 						}
 						var stdout, stderr bytes.Buffer
 						if err := exec.Stream(remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
-							return fmt.Errorf("the connection should be success: %w", err)
+							klog.ErrorS(err, "Executing Stream and check connection error", "stdout", stdout.String(), "stderr", stderr.String(), "fromPod", fromPod.Name, "toPod", toPod.Name)
+							return fmt.Errorf("the connection should be success, error: %w, fromPod: %s, toPod: %s", err, fromPod.Name, toPod.Name)
 						}
+						klog.InfoS("Executed Stream and check connection", "stdout", stdout.String(), "stderr", stderr.String())
 						return nil
-					})
-					if err != nil {
+					}); err != nil {
 						return err
 					}
 				}

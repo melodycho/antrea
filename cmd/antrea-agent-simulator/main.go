@@ -56,6 +56,7 @@ func newSimulatorCommand() *cobra.Command {
 
 	flags := cmd.Flags()
 	log.AddFlags(flags)
+
 	// Install log flags
 	flags.AddGoFlagSet(flag.CommandLine)
 	return cmd

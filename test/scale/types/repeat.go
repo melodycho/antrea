@@ -17,8 +17,9 @@ package types
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 type Repeat struct {
@@ -39,10 +40,15 @@ func (r *Repeat) Includes(testCases ...TestCase) TestCase {
 func (r *Repeat) Run(ctx context.Context, testData TestData) error {
 	for i := 0; i < r.times; i++ {
 		err := func() error {
-			name := fmt.Sprintf("Repeat: %s-%d", r.testCase.Name(), i)
-			ctx := wrapWithBreadcrumb(ctx, name)
-			klog.Infof("Begin: %s", ctx.Value(CtxBreadcrumbs).(string))
-			defer klog.Infof("Finish: %s", ctx.Value(CtxBreadcrumbs).(string))
+			startTime := time.Now()
+			ctx := wrapWithBreadcrumb(ctx, fmt.Sprintf("Repeat: %s-%d", r.testCase.Name(), i))
+			caseName := ctx.Value(CtxBreadcrumbs).(string)
+			klog.InfoS("#################################################", "Name", caseName)
+			defer func() {
+				klog.InfoS("#################################################", "Name", caseName)
+				klog.V(2).InfoS("Test time", "Name", caseName, "durationTime", time.Since(startTime))
+			}()
+
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

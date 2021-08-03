@@ -17,7 +17,6 @@ package cases
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/scale/types"
 	"antrea.io/antrea/test/scale/utils"
@@ -79,7 +78,7 @@ func newWorkloadPod(podName string, onRealNode bool) *corev1.Pod {
 	}
 	for len(labels) == 1 { // must generate at least one label.
 		for _, l := range types.LabelCandidates {
-			if genRandInt(math.MaxInt64)%10 < 8 {
+			if genRandInt()%10 < 8 {
 				labels[l] = ""
 			}
 		}
@@ -91,11 +90,12 @@ func newWorkloadPod(podName string, onRealNode bool) *corev1.Pod {
 }
 
 func TestCasePodCreation() TestCase {
-	return chain("Creating workload Pods",
+	return chain("Testing workload Pods",
 		do("Creating workload Pods", func(ctx Context, data TestData) error {
 			for i := 0; i < data.PodNumber(); i++ {
 				podName := fmt.Sprintf("antrea-scale-test-pod-%s", uuid.New().String())
 				onRealNode := (i % data.NodeNumber()) >= data.SimulateNodeNumber()
+				klog.InfoS("Creating Pods", "onRealNode", onRealNode)
 				pod := newWorkloadPod(podName, onRealNode)
 				if _, err := data.KubernetesClientSet().CoreV1().
 					Pods(types.ScaleTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
@@ -111,7 +111,7 @@ func TestCasePodCreation() TestCase {
 						CoreV1().Pods(types.ScaleTestNamespace).
 						List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", types.AppLabelKey, types.AppLabelValue)})
 					if err != nil {
-						klog.Warningf("Error when listing Pods: %v", err)
+						klog.ErrorS(err, "Error when listing Pods")
 					} else {
 						var count int
 						for _, pod := range podsResult.Items {
@@ -168,7 +168,7 @@ func TestCasePodChurn(podNumber int) TestCase {
 					CoreV1().Pods(types.ScaleTestNamespace).
 					List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 				if err != nil {
-					klog.Warningf("Error when listing Pods: %v", err)
+					klog.ErrorS(err, "Error when listing Pods")
 					return false, err
 				}
 				return len(podsResult.Items) == 0, nil
