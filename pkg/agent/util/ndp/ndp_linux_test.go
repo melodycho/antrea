@@ -33,11 +33,38 @@ func TestAdvertiserMarshalMessage(t *testing.T) {
 			name:         "NDP neighbor advertise marshalMessage",
 			ipv6Addr:     "fe80::250:56ff:fea7:e29d",
 			hardwareAddr: net.HardwareAddr{0x00, 0x50, 0x56, 0xa7, 0xe2, 0x9d},
+			// Neighbor Advertisement Message Format
+			//
+			//   A node sends Neighbor Advertisements in response to Neighbor
+			//   Solicitations and sends unsolicited Neighbor Advertisements in order
+			//   to (unreliably) propagate new information quickly.
+			//
+			//       0                   1                   2                   3
+			//       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+			//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+			//      |     Type      |     Code      |          Checksum             |
+			//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+			//      |R|S|O|                     Reserved                            |
+			//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+			//      |                                                               |
+			//      +                                                               +
+			//      |                                                               |
+			//      +                       Target Address                          +
+			//      |                                                               |
+			//      +                                                               +
+			//      |                                                               |
+			//      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+			//      |   Options ...
+			//      +-+-+-+-+-+-+-+-+-+-+-+-
 			want: []byte{
-				0x88, 0x0, 0x0, 0x0, 0x20, 0x0, 0x0, 0x0,
-				0xfe, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
-				0x2, 0x50, 0x56, 0xff, 0xfe, 0xa7, 0xe2, 0x9d,
-				0x2, 0x1, 0x0, 0x50, 0x56, 0xa7, 0xe2, 0x9d,
+				0x88, 0x0, 0x0, 0x0,
+				0x20, 0x0, 0x0, 0x0,
+				0xfe, 0x80, 0x0, 0x0,
+				0x0, 0x0, 0x0, 0x0,
+				0x2, 0x50, 0x56, 0xff,
+				0xfe, 0xa7, 0xe2, 0x9d,
+				0x2, 0x1, 0x0, 0x50,
+				0x56, 0xa7, 0xe2, 0x9d,
 			},
 		},
 	}

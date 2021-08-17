@@ -43,6 +43,9 @@ const (
 
 	// Minimum byte length values for each type of valid Message.
 	naLen = 20
+
+	// Hop limit is always 255, refer RFC 4861.
+	hopLimit = 255
 )
 
 // NeighborAdvertisement sends a NDP Neighbor Advertisement over interface 'iface' from 'srcIP'.
@@ -61,6 +64,8 @@ func NeighborAdvertisement(srcIP net.IP, iface *net.Interface) error {
 		return err
 	}
 	defer syscall.Close(sockInet6)
+
+	syscall.SetsockoptInt(sockInet6, syscall.IPPROTO_IPV6, syscall.IPV6_MULTICAST_HOPS, hopLimit)
 
 	var r [16]byte
 	copy(r[:], net.IPv6linklocalallnodes.To16())

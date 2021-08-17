@@ -31,7 +31,25 @@ import (
 const dummyDeviceName = "antrea-dummy0"
 
 func TestIPAssigner(t *testing.T) {
-	ipAssigner, err := ipassigner.NewIPAssigner(net.ParseIP("127.0.0.1"), dummyDeviceName)
+	var nodeIP net.IP
+	linkList, err := net.Interfaces()
+	require.NoError(t, err)
+	for _, link := range linkList {
+		if link.HardwareAddr == nil {
+			continue
+		}
+		addrList, err := link.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrList {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				nodeIP = ipNet.IP
+				break
+			}
+		}
+	}
+	ipAssigner, err := ipassigner.NewIPAssigner(nodeIP, dummyDeviceName)
 	require.NoError(t, err, "Initializing IP assigner failed")
 
 	dummyDevice, err := netlink.LinkByName(dummyDeviceName)
@@ -43,7 +61,7 @@ func TestIPAssigner(t *testing.T) {
 
 	ip1 := "10.10.10.10"
 	ip2 := "10.10.10.11"
-	ip3 := "2621:124:6020:1006:250:56ff:fea7:36c2"
+	ip3 := "2021:124:6020:1006:250:56ff:fea7:36c2"
 	desiredIPs := sets.NewString(ip1, ip2, ip3)
 
 	for ip := range desiredIPs {
@@ -63,7 +81,7 @@ func TestIPAssigner(t *testing.T) {
 	assert.Equal(t, desiredIPs, actualIPs, "Actual IPs don't match")
 
 	// NewIPAssigner should load existing IPs correctly.
-	newIPAssigner, err := ipassigner.NewIPAssigner(net.ParseIP("127.0.0.1"), dummyDeviceName)
+	newIPAssigner, err := ipassigner.NewIPAssigner(nodeIP, dummyDeviceName)
 	require.NoError(t, err, "Initializing new IP assigner failed")
 	assert.Equal(t, desiredIPs, newIPAssigner.AssignedIPs(), "Assigned IPs don't match")
 
