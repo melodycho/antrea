@@ -68,7 +68,7 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.16.0 // indirect
-	golang.org/x/crypto v0.0.0-20210503195802-e9a32991a82e // indirect
+	golang.org/x/crypto v0.0.0-20210513164829-c07d793c2f9a // indirect
 	golang.org/x/net v0.0.0-20210504132125-bbd867fde50d // indirect
 	golang.org/x/oauth2 v0.0.0-20200902213428-5d25da1a8d43 // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
