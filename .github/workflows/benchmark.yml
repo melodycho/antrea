@@ -1,6 +1,13 @@
 name: Go Benchmark Test
 
-on: [pull_request, push]
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  push:
+    branches:
+      - benchci-*
 
 jobs:
   check-changes:
