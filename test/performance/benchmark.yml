@@ -38,23 +38,28 @@ benchmarks:
     package: "./pkg/agent/controller/networkpolicy"
   - name: "BenchmarkGroupPodsByServicesWithNamedPort"
     package: "./pkg/agent/controller/networkpolicy"
-    threshold: 0.2
+    threshold: 0.3
   - name: "BenchmarkGroupPodsByServicesWithoutNamedPort"
     package: "./pkg/agent/controller/networkpolicy"
+    threshold: 0.3
   - name: "BenchmarkSyncHandler"
     package: "./pkg/agent/controller/networkpolicy"
   - name: "BenchmarkPoll"
     package: "./pkg/agent/flowexporter/connections"
+    version_requirement: ">1.3.0"
   - name: "BenchmarkExportConntrackConns"
     package: "./pkg/agent/flowexporter/exporter"
     threshold: 0.2
     benchtime: 10x
   - name: "BenchmarkCompareNPLAnnotationLists/EqualSameOrder"
     package: "./pkg/agent/nodeportlocal/k8s"
+    threshold: 0.2
   - name: "BenchmarkCompareNPLAnnotationLists/EqualDifferentOrder"
     package: "./pkg/agent/nodeportlocal/k8s"
+    threshold: 0.2
   - name: "BenchmarkCompareNPLAnnotationLists/NotEqualSameLength"
     package: "./pkg/agent/nodeportlocal/k8s"
+    threshold: 0.3
   - name: "BenchmarkCompareNPLAnnotationLists/NotEqualDifferentLength"
     package: "./pkg/agent/nodeportlocal/k8s"
   - name: "BenchmarkBatchInstallPolicyRuleFlows"
