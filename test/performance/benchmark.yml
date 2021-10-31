@@ -4,7 +4,7 @@ threshold: 0.1
 compare: "ns/op,B/op"
 cpu: 2
 benchmem: true
-timeout: 15m
+timeout: 10m
 benchmarks:
   - name: "BenchmarkInitXLargeScaleWithSmallNamespaces"
     package: "./pkg/controller/networkpolicy"
@@ -30,6 +30,7 @@ benchmarks:
     version_requirement: ">1.3.0"
   - name: "BenchmarkCluster_ShouldSelect/Select_Node_from_1000_alive_Nodes-nodeSelectedForEgress"
     package: "./pkg/agent/memberlist"
+    version_requirement: ">1.2.0"
   - name: "BenchmarkRuleCacheUnionAddressGroups"
     package: "./pkg/agent/controller/networkpolicy"
     threshold: 0.15
