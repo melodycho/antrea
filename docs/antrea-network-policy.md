@@ -1062,6 +1062,87 @@ spec:
       - fqdn: "svcA.default.svc.cluster.local"
 ```
 
+## Node Selector 
+
+NodeSelector selects all nodes which should be subject to this rule.
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: test-np
+  namespace: default
+spec:
+    appliedTo:
+      - podSelector:
+          matchLabels:
+            role: app
+    egress:
+      - nodeSelector:
+          matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: ["master"]
+          matchLabels:
+            - kubernetes.io/role: master
+      - action: Allow
+        to:
+          - ipBlock:
+              cidr: 172.16.10.0/24
+        ports:
+          - protocol: TCP
+            port: 443
+```
+
+**Describe the problem/challenge you have**
+
+When defining NetworkPolicy, could we also have a nodeSelector so that we can define policy 
+for pods/containers which run in the net=host network namespace on certain nodes? 
+This would allow us to define rules for access from pods such as ingress containers to pods 
+on the nodes that they service. 
+While it would be possible to set an NetworkCIDR rule it would be hard to support multi-tenant 
+without putting different customers in their own subnets (which would be complex and harder to 
+scale/change).
+By being able to define certain nodes by labels we would be able to create rules that target 
+certain kubernetes nodes by label for ingress/egress.
+
+
+Support defining NetworkPolicy with nodeSelector to 
+
+**Describe the solution you'd like**
+
+Define a nodeSelector field in NetworkPolicy egress/ingress rule.
+NodeSelector selects certain nodes which should be subject to the rule.
+For example, we could firewall all pods in cluster with NetworkPolicies, 
+but some pods can also talk to kube-apiserver at the same time.
+The following policy will allow egress traffic for any node with the label kubernetes.io/role=master
+on TCP ports 6443 (kube-apiserver).
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: NetworkPolicy
+metadata:
+  name: test-np
+  namespace: default
+spec:
+    appliedTo:
+      - podSelector:
+          matchLabels:
+            role: app
+    egress:
+      - nodeSelector:
+          matchLabels:
+            - kubernetes.io/role: master
+      - action: Allow
+        to:
+          - ipBlock:
+              cidr: 172.16.10.0/24
+        ports:
+          - protocol: TCP
+            port: 6443
+```
+
+**Anything else you would like to add?**
+
+
 ## toServices instruction
 
 A combination of Service name and Service Namespace can be used in `toServices` to refer to a Service.

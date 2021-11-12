@@ -1900,6 +1900,29 @@ spec:
               appliedTo:
                 items:
                   properties:
+                    nodeSelector:
+                      properties:
+                        matchExpressions:
+                          items:
+                            properties:
+                              key:
+                                type: string
+                              operator:
+                                enum:
+                                - In
+                                - NotIn
+                                - Exists
+                                - DoesNotExist
+                                type: string
+                              values:
+                                items:
+                                  pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
+                                  type: string
+                                type: array
+                            type: object
+                          type: array
+                        matchLabels:
+                          x-kubernetes-preserve-unknown-fields: true
                     podSelector:
                       properties:
                         matchExpressions:
@@ -2038,6 +2061,30 @@ spec:
                               matchLabels:
                                 x-kubernetes-preserve-unknown-fields: true
                             type: object
+                          nodeSelector:
+                            properties:
+                              matchExpressions:
+                                items:
+                                  properties:
+                                    key:
+                                      type: string
+                                    operator:
+                                      enum:
+                                      - In
+                                      - NotIn
+                                      - Exists
+                                      - DoesNotExist
+                                      type: string
+                                    values:
+                                      items:
+                                        pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
+                                        type: string
+                                      type: array
+                                  type: object
+                                type: array
+                              matchLabels:
+                                x-kubernetes-preserve-unknown-fields: true
+                            type: object
                           podSelector:
                             properties:
                               matchExpressions:
@@ -2153,6 +2200,30 @@ spec:
                                 type: string
                             type: object
                           namespaceSelector:
+                            properties:
+                              matchExpressions:
+                                items:
+                                  properties:
+                                    key:
+                                      type: string
+                                    operator:
+                                      enum:
+                                      - In
+                                      - NotIn
+                                      - Exists
+                                      - DoesNotExist
+                                      type: string
+                                    values:
+                                      items:
+                                        pattern: ^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$
+                                        type: string
+                                      type: array
+                                  type: object
+                                type: array
+                              matchLabels:
+                                x-kubernetes-preserve-unknown-fields: true
+                            type: object
+                          nodeSelector:
                             properties:
                               matchExpressions:
                                 items:
