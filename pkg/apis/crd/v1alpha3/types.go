@@ -70,6 +70,11 @@ type GroupSpec struct {
 	// Cannot be set with any selector/IPBlock/ServiceReference.
 	// +optional
 	ChildGroups []ClusterGroupReference `json:"childGroups,omitempty"`
+	// Select Pods from certain Nodes which match the label selector,
+	// if no nodeSelector is specified, then all Nodes will be selected
+	// in the cluster.
+	// +optional
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 type GroupConditionType string

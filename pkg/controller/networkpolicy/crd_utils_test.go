@@ -150,7 +150,7 @@ func TestToAntreaPeerForCRD(t *testing.T) {
 	selectorC := metav1.LabelSelector{MatchLabels: map[string]string{"foo3": "bar3"}}
 	selectorAll := metav1.LabelSelector{}
 	matchAllPodsPeer := matchAllPeer
-	matchAllPodsPeer.AddressGroups = []string{getNormalizedUID(toGroupSelector("", nil, &selectorAll, nil).NormalizedName)}
+	matchAllPodsPeer.AddressGroups = []string{getNormalizedUID(toGroupSelector("", nil, &selectorAll, nil, nil).NormalizedName)}
 	// cgA with selector present in cache
 	cgA := crdv1alpha3.ClusterGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: "cgA", UID: "uidA"},
@@ -179,8 +179,8 @@ func TestToAntreaPeerForCRD(t *testing.T) {
 			},
 			outPeer: controlplane.NetworkPolicyPeer{
 				AddressGroups: []string{
-					getNormalizedUID(toGroupSelector("", &selectorA, &selectorB, nil).NormalizedName),
-					getNormalizedUID(toGroupSelector("", &selectorC, nil, nil).NormalizedName),
+					getNormalizedUID(toGroupSelector("", &selectorA, &selectorB, nil, nil).NormalizedName),
+					getNormalizedUID(toGroupSelector("", &selectorC, nil, nil, nil).NormalizedName),
 				},
 			},
 			direction: controlplane.DirectionIn,
@@ -198,8 +198,8 @@ func TestToAntreaPeerForCRD(t *testing.T) {
 			},
 			outPeer: controlplane.NetworkPolicyPeer{
 				AddressGroups: []string{
-					getNormalizedUID(toGroupSelector("", &selectorA, &selectorB, nil).NormalizedName),
-					getNormalizedUID(toGroupSelector("", &selectorC, nil, nil).NormalizedName),
+					getNormalizedUID(toGroupSelector("", &selectorA, &selectorB, nil, nil).NormalizedName),
+					getNormalizedUID(toGroupSelector("", &selectorC, nil, nil, nil).NormalizedName),
 				},
 			},
 			direction: controlplane.DirectionOut,

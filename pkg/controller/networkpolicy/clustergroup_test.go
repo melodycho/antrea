@@ -55,7 +55,7 @@ func TestProcessClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidA",
 				Name:     "cgA",
-				Selector: toGroupSelector("", nil, &selectorA, nil),
+				Selector: toGroupSelector("", nil, &selectorA, nil, nil),
 			},
 		},
 		{
@@ -69,7 +69,7 @@ func TestProcessClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidB",
 				Name:     "cgB",
-				Selector: toGroupSelector("", &selectorB, nil, nil),
+				Selector: toGroupSelector("", &selectorB, nil, nil, nil),
 			},
 		},
 		{
@@ -84,7 +84,7 @@ func TestProcessClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidC",
 				Name:     "cgC",
-				Selector: toGroupSelector("", &selectorC, &selectorD, nil),
+				Selector: toGroupSelector("", &selectorC, &selectorD, nil, nil),
 			},
 		},
 		{
@@ -177,7 +177,7 @@ func TestAddClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidA",
 				Name:     "cgA",
-				Selector: toGroupSelector("", nil, &selectorA, nil),
+				Selector: toGroupSelector("", nil, &selectorA, nil, nil),
 			},
 		},
 		{
@@ -191,7 +191,7 @@ func TestAddClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidB",
 				Name:     "cgB",
-				Selector: toGroupSelector("", &selectorB, nil, nil),
+				Selector: toGroupSelector("", &selectorB, nil, nil, nil),
 			},
 		},
 		{
@@ -206,7 +206,7 @@ func TestAddClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidC",
 				Name:     "cgC",
-				Selector: toGroupSelector("", &selectorC, &selectorD, nil),
+				Selector: toGroupSelector("", &selectorC, &selectorD, nil, nil),
 			},
 		},
 		{
@@ -274,7 +274,7 @@ func TestUpdateClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidA",
 				Name:     "cgA",
-				Selector: toGroupSelector("", nil, &selectorB, nil),
+				Selector: toGroupSelector("", nil, &selectorB, nil, nil),
 			},
 		},
 		{
@@ -288,7 +288,7 @@ func TestUpdateClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidA",
 				Name:     "cgA",
-				Selector: toGroupSelector("", &selectorC, nil, nil),
+				Selector: toGroupSelector("", &selectorC, nil, nil, nil),
 			},
 		},
 		{
@@ -303,7 +303,7 @@ func TestUpdateClusterGroup(t *testing.T) {
 			expectedGroup: &antreatypes.Group{
 				UID:      "uidA",
 				Name:     "cgA",
-				Selector: toGroupSelector("", &selectorC, &selectorD, nil),
+				Selector: toGroupSelector("", &selectorC, &selectorD, nil, nil),
 			},
 		},
 		{
@@ -482,7 +482,7 @@ func TestFilterInternalGroupsForService(t *testing.T) {
 			Name:      "svc1",
 			Namespace: metav1.NamespaceDefault,
 		},
-		Selector: toGroupSelector(metav1.NamespaceDefault, &selectorSpec, nil, nil),
+		Selector: toGroupSelector(metav1.NamespaceDefault, &selectorSpec, nil, nil, nil),
 	}
 	grp3 := &antreatypes.Group{
 		UID:  "uid3",
@@ -492,7 +492,7 @@ func TestFilterInternalGroupsForService(t *testing.T) {
 			Namespace: "test",
 		},
 		// Selector is out of sync with latest service spec, but the CG should still be returned.
-		Selector: toGroupSelector("test", nil, nil, nil),
+		Selector: toGroupSelector("test", nil, nil, nil, nil),
 	}
 	grp4 := &antreatypes.Group{
 		UID:  "uid4",
@@ -598,13 +598,13 @@ func TestServiceToGroupSelector(t *testing.T) {
 			"service-default-ns",
 			svc1,
 			grp1,
-			toGroupSelector(metav1.NamespaceDefault, &selectorSpec, nil, nil),
+			toGroupSelector(metav1.NamespaceDefault, &selectorSpec, nil, nil, nil),
 		},
 		{
 			"service-match-name-and-namespace",
 			svc2,
 			grp2,
-			toGroupSelector("test", &selectorSpec, nil, nil),
+			toGroupSelector("test", &selectorSpec, nil, nil, nil),
 		},
 		{
 			"service-without-selectors",
@@ -915,7 +915,8 @@ func TestSyncInternalGroup(t *testing.T) {
 				Action:    &allowAction,
 			},
 		},
-		AppliedToGroups: []string{getNormalizedUID(toGroupSelector("", &selectorB, nil, nil).NormalizedName)},
+		AppliedToGroups: []string{getNormalizedUID(toGroupSelector("", &selectorB, nil,
+			nil, nil).NormalizedName)},
 	}
 	actualInternalNetworkPolicy1, exists, _ := npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(cnp1))
 	require.True(t, exists)
@@ -939,7 +940,8 @@ func TestSyncInternalGroup(t *testing.T) {
 				Action:    &allowAction,
 			},
 		},
-		AppliedToGroups: []string{getNormalizedUID(toGroupSelector("", &selectorC, nil, nil).NormalizedName)},
+		AppliedToGroups: []string{getNormalizedUID(toGroupSelector("", &selectorC, nil,
+			nil, nil).NormalizedName)},
 	}
 	actualInternalNetworkPolicy2, exists, _ := npc.internalNetworkPolicyStore.Get(internalNetworkPolicyKeyFunc(cnp2))
 	require.True(t, exists)
@@ -948,7 +950,7 @@ func TestSyncInternalGroup(t *testing.T) {
 	expectedInternalGroup := &antreatypes.Group{
 		UID:      cgUID,
 		Name:     cgName,
-		Selector: toGroupSelector("", nil, &selectorA, nil),
+		Selector: toGroupSelector("", nil, &selectorA, nil, nil),
 	}
 	actualInternalGroup, exists, _ := npc.internalGroupStore.Get(internalGroupKeyFunc(cg))
 	require.True(t, exists)

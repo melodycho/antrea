@@ -123,10 +123,10 @@ var (
 // will first attempt to retrieve the Tier by it's name from K8s and if missing,
 // create the CR. InitializeTiers will be called as part of a Post-Start hook
 // of antrea-controller's APIServer.
-func (n *NetworkPolicyController) InitializeTiers() {
+func (c *NetworkPolicyController) InitializeTiers() {
 	for _, t := range systemGeneratedTiers {
 		// Check if Tier is already present.
-		oldTier, err := n.tierLister.Get(t.Name)
+		oldTier, err := c.tierLister.Get(t.Name)
 		if err == nil {
 			// Tier is already present.
 			klog.V(2).Infof("%s Tier already created", t.Name)
@@ -135,24 +135,24 @@ func (n *NetworkPolicyController) InitializeTiers() {
 			if oldTier.Spec.Priority != expPrio {
 				tToUpdate := oldTier.DeepCopy()
 				tToUpdate.Spec.Priority = expPrio
-				n.updateTier(tToUpdate)
+				c.updateTier(tToUpdate)
 			}
 			continue
 		}
-		n.initTier(t)
+		c.initTier(t)
 	}
 }
 
 // initTier attempts to create system Tiers until they are created using an
 // exponential backoff period from 1 to max of 8secs.
-func (n *NetworkPolicyController) initTier(t *secv1alpha1.Tier) {
+func (c *NetworkPolicyController) initTier(t *secv1alpha1.Tier) {
 	var err error
 	const maxBackoffTime = 8 * time.Second
 	backoff := 1 * time.Second
 	retryAttempt := 1
 	for {
 		klog.V(2).Infof("Creating %s Tier", t.Name)
-		_, err = n.crdClient.CrdV1alpha1().Tiers().Create(context.TODO(), t, metav1.CreateOptions{})
+		_, err = c.crdClient.CrdV1alpha1().Tiers().Create(context.TODO(), t, metav1.CreateOptions{})
 		// Attempt to recreate Tier after a backoff only if it does not exist.
 		if err != nil && !errors.IsAlreadyExists(err) {
 			klog.Warningf("Failed to create %s Tier on init: %v. Retry attempt: %d", t.Name, err, retryAttempt)
@@ -173,14 +173,14 @@ func (n *NetworkPolicyController) initTier(t *secv1alpha1.Tier) {
 
 // updateTier attempts to update Tiers using an
 // exponential backoff period from 1 to max of 8secs.
-func (n *NetworkPolicyController) updateTier(t *secv1alpha1.Tier) {
+func (c *NetworkPolicyController) updateTier(t *secv1alpha1.Tier) {
 	var err error
 	const maxBackoffTime = 8 * time.Second
 	backoff := 1 * time.Second
 	retryAttempt := 1
 	for {
 		klog.V(2).Infof("Updating %s Tier", t.Name)
-		_, err = n.crdClient.CrdV1alpha1().Tiers().Update(context.TODO(), t, metav1.UpdateOptions{})
+		_, err = c.crdClient.CrdV1alpha1().Tiers().Update(context.TODO(), t, metav1.UpdateOptions{})
 		// Attempt to update Tier after a backoff.
 		if err != nil {
 			klog.Warningf("Failed to update %s Tier on init: %v. Retry attempt: %d", t.Name, err, retryAttempt)

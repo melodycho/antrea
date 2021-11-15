@@ -526,6 +526,8 @@ since Pod IPs are ephemeral and unpredictable.
 select Fully Qualified Domain Names (FQDNs), specified either by exact name or wildcard
 expressions, when defining `egress` rules.
 
+**nodeSelector**: nodeSelector
+
 ### Key differences from K8s NetworkPolicy
 
 - ClusterNetworkPolicy is at the cluster scope, hence a `podSelector` without

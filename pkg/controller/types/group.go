@@ -48,6 +48,8 @@ type GroupSelector struct {
 	// If Namespace and NamespaceSelector both are unset, it selects the ExternalEntities in all the Namespaces.
 	// TODO: Add validation in API to not allow externalEntitySelector and podSelector in the same group.
 	ExternalEntitySelector labels.Selector
+
+	NodeSelector labels.Selector
 }
 
 func NewGroupSelector(namespace string, podSelector, nsSelector, extEntitySelector *metav1.LabelSelector) *GroupSelector {
@@ -68,16 +70,17 @@ func NewGroupSelector(namespace string, podSelector, nsSelector, extEntitySelect
 		nSelector, _ := metav1.LabelSelectorAsSelector(nsSelector)
 		groupSelector.NamespaceSelector = nSelector
 	}
-	name := generateNormalizedName(groupSelector.Namespace, groupSelector.PodSelector, groupSelector.NamespaceSelector, groupSelector.ExternalEntitySelector)
+	name := GenerateNormalizedName(groupSelector.Namespace, groupSelector.PodSelector, groupSelector.NamespaceSelector,
+		groupSelector.ExternalEntitySelector, groupSelector.NodeSelector)
 	groupSelector.NormalizedName = name
 	return &groupSelector
 }
 
-// generateNormalizedName generates a string, based on the selectors, in
+// GenerateNormalizedName generates a string, based on the selectors, in
 // the following format: "namespace=NamespaceName And podSelector=normalizedPodSelector".
 // Note: Namespace and nsSelector may or may not be set depending on the
 // selector. However, they cannot be set simultaneously.
-func generateNormalizedName(namespace string, podSelector, nsSelector, eeSelector labels.Selector) string {
+func GenerateNormalizedName(namespace string, podSelector, nsSelector, eeSelector, nodeSelector labels.Selector) string {
 	normalizedName := []string{}
 	if nsSelector != nil {
 		normalizedName = append(normalizedName, fmt.Sprintf("namespaceSelector=%s", nsSelector.String()))
@@ -89,6 +92,9 @@ func generateNormalizedName(namespace string, podSelector, nsSelector, eeSelecto
 	}
 	if eeSelector != nil {
 		normalizedName = append(normalizedName, fmt.Sprintf("eeSelector=%s", eeSelector.String()))
+	}
+	if nodeSelector != nil {
+		normalizedName = append(normalizedName, fmt.Sprintf("nodeSelector=%s", nodeSelector.String()))
 	}
 	sort.Strings(normalizedName)
 	return strings.Join(normalizedName, " And ")
