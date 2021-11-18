@@ -559,6 +559,9 @@ since Pod IPs are ephemeral and unpredictable.
 select Fully Qualified Domain Names (FQDNs), specified either by exact name or wildcard
 expressions, when defining `egress` rules.
 
+**nodeSelector**: This selects certain Node IPs as ingress from address or egress to address.
+It is applicable only to the `from` section in an `ingress` block or the `to` section in an `egress` block.
+
 ### Key differences from K8s NetworkPolicy
 
 - ClusterNetworkPolicy is at the cluster scope, hence a `podSelector` without
@@ -1094,6 +1097,37 @@ spec:
     to:
       - fqdn: "svcA.default.svc.cluster.local"
 ```
+
+## Node Selector 
+
+NodeSelector selects certain Nodes which match the label selector.Add Node IPs to address group memberSet.
+The following rule applied to Pods with label `app=antrea-test-app` and will `Drop` egress traffic to 
+Nodes which has labels `kubernetes.io/hostname=kind-control-plane`.
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: egress-control-plane
+spec:
+  priority: 1
+  appliedTo:
+    - podSelector:
+        matchLabels:
+          app: antrea-test-app
+  egress:
+    - action: Drop
+      to:
+        - nodeSelector:
+            matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - kind-control-plane
+      ports:
+        - protocol: TCP
+          port: 6443
+```
+
 
 ## toServices instruction
 

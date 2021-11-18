@@ -15,6 +15,7 @@
 package v1alpha1
 
 import (
+	_ "github.com/golang/mock/mockgen/model"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -434,6 +435,11 @@ type NetworkPolicyPeer struct {
 	//  Exact FQDNs, i.e. "google.com", "db-svc.default.svc.cluster.local"
 	//  Wildcard expressions, i.e. "*wayfair.com".
 	FQDN string `json:"fqdn,omitempty"`
+	// Select certain Nodes which match the label selector,
+	// if no nodeSelector is specified, then all Nodes will be selected
+	// in the cluster.
+	// +optional
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
 
 type PeerNamespaces struct {
