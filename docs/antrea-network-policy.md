@@ -35,6 +35,7 @@
   - [K8s clusters with version 1.21 and above](#k8s-clusters-with-version-121-and-above)
   - [K8s clusters with version 1.20 and below](#k8s-clusters-with-version-120-and-below)
 - [FQDN based filtering](#fqdn-based-filtering)
+- [Node Selector](#node-selector)
 - [toServices instruction](#toservices-instruction)
 - [ServiceAccount based selection](#serviceaccount-based-selection)
 - [RBAC](#rbac)
@@ -531,7 +532,7 @@ Usage of ClusterGroups along with stand-alone selectors is not allowed.
 
 ### Behavior of *to* and *from* selectors
 
-There are six kinds of selectors that can be specified in an ingress `from`
+There are seven kinds of selectors that can be specified in an ingress `from`
 section or egress `to` section:
 
 **podSelector**: This selects particular Pods from all Namespaces as "sources",
@@ -544,6 +545,10 @@ with `namespaces` field.
 **podSelector** and **namespaceSelector**:  A single to/from entry that
 specifies both namespaceSelector and podSelector selects particular Pods within
 particular Namespaces.
+
+**nodeSelector**: This selects particular Nodes in cluster. The selected Node's
+IPs will set as "sources" if `nodeSelector` set in `ingress` section, or as
+"destinations" if set in `egress` section.
 
 **namespaces**: A `namespaces` field allows users to perform advanced matching on
 Namespace objects which cannot be done via label selectors. Currently, the
@@ -1100,6 +1105,35 @@ spec:
   - action: Drop
     to:
       - fqdn: "svcA.default.svc.cluster.local"
+```
+
+## Node Selector
+
+NodeSelector selects certain Nodes which match the label selector. It adds Node IPs to egress rules in `to` field
+or ingress rules in `from` filed.
+The following rule applies to Pods with label `app=antrea-test-app` and will `Drop` egress traffic to
+Nodes which have the labels `node-role.kubernetes.io/control-plane`.
+
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: egress-control-plane
+spec:
+  priority: 1
+  appliedTo:
+    - podSelector:
+        matchLabels:
+          app: antrea-test-app
+  egress:
+    - action: Drop
+      to:
+        - nodeSelector:
+            matchLabels:
+              node-role.kubernetes.io/control-plane: ""
+      ports:
+        - protocol: TCP
+          port: 6443
 ```
 
 ## toServices instruction

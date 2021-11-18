@@ -30,6 +30,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -173,6 +174,13 @@ type NetworkPolicyController struct {
 	// once.
 	cgListerSynced cache.InformerSynced
 
+	nodeInformer coreinformers.NodeInformer
+	// nodeLister is able to list/get Nodes and is populated by the shared informer passed to
+	// NewNetworkPolicyController.
+	nodeLister corelisters.NodeLister
+	// nodeListerSynced is a function which returns true if the Node shared informer has been synced at least once.
+	nodeListerSynced cache.InformerSynced
+
 	// addressGroupStore is the storage where the populated Address Groups are stored.
 	addressGroupStore storage.Interface
 	// appliedToGroupStore is the storage where the populated AppliedTo Groups are stored.
@@ -289,6 +297,7 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 	namespaceInformer coreinformers.NamespaceInformer,
 	serviceInformer coreinformers.ServiceInformer,
 	networkPolicyInformer networkinginformers.NetworkPolicyInformer,
+	nodeInformer coreinformers.NodeInformer,
 	cnpInformer secinformers.ClusterNetworkPolicyInformer,
 	anpInformer secinformers.NetworkPolicyInformer,
 	tierInformer secinformers.TierInformer,
@@ -334,6 +343,9 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		n.serviceInformer = serviceInformer
 		n.serviceLister = serviceInformer.Lister()
 		n.serviceListerSynced = serviceInformer.Informer().HasSynced
+		n.nodeInformer = nodeInformer
+		n.nodeLister = nodeInformer.Lister()
+		n.nodeListerSynced = nodeInformer.Informer().HasSynced
 		n.cnpInformer = cnpInformer
 		n.cnpLister = cnpInformer.Lister()
 		n.cnpListerSynced = cnpInformer.Informer().HasSynced
@@ -360,6 +372,15 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 				AddFunc:    n.addService,
 				UpdateFunc: n.updateService,
 				DeleteFunc: n.deleteService,
+			},
+			resyncPeriod,
+		)
+		// Add handlers for Node events.
+		nodeInformer.Informer().AddEventHandlerWithResyncPeriod(
+			cache.ResourceEventHandlerFuncs{
+				AddFunc:    n.addNode,
+				UpdateFunc: n.updateNode,
+				DeleteFunc: n.deleteNode,
 			},
 			resyncPeriod,
 		)
@@ -434,7 +455,7 @@ func getNormalizedUID(name string) string {
 
 // createAppliedToGroup creates an AppliedToGroup object in store if it is not created already.
 func (n *NetworkPolicyController) createAppliedToGroup(npNsName string, pSel, nSel, eSel *metav1.LabelSelector) string {
-	groupSelector := antreatypes.NewGroupSelector(npNsName, pSel, nSel, eSel)
+	groupSelector := antreatypes.NewGroupSelector(npNsName, pSel, nSel, eSel, nil)
 	appliedToGroupUID := getNormalizedUID(groupSelector.NormalizedName)
 	// Get or create a AppliedToGroup for the generated UID.
 	// Ignoring returned error (here and elsewhere in this file) as with the
@@ -460,8 +481,8 @@ func (n *NetworkPolicyController) createAppliedToGroup(npNsName string, pSel, nS
 // NetworkPolicyPeer object in NetworkPolicyRule. This function simply
 // creates the object without actually populating the PodAddresses as the
 // affected GroupMembers are calculated during sync process.
-func (n *NetworkPolicyController) createAddressGroup(namespace string, podSelector, nsSelector, eeSelector *metav1.LabelSelector) string {
-	groupSelector := antreatypes.NewGroupSelector(namespace, podSelector, nsSelector, eeSelector)
+func (n *NetworkPolicyController) createAddressGroup(namespace string, podSelector, nsSelector, eeSelector, nodeSelector *metav1.LabelSelector) string {
+	groupSelector := antreatypes.NewGroupSelector(namespace, podSelector, nsSelector, eeSelector, nodeSelector)
 	normalizedUID := getNormalizedUID(groupSelector.NormalizedName)
 	// Get or create an AddressGroup for the generated UID.
 	_, found, _ := n.addressGroupStore.Get(normalizedUID)
@@ -621,7 +642,7 @@ func (n *NetworkPolicyController) toAntreaPeer(peers []networkingv1.NetworkPolic
 		if dir == controlplane.DirectionIn || !namedPortExists {
 			return &matchAllPeer
 		}
-		allPodsGroupUID := n.createAddressGroup(np.Namespace, matchAllPodsPeer.PodSelector, matchAllPodsPeer.NamespaceSelector, nil)
+		allPodsGroupUID := n.createAddressGroup(np.Namespace, matchAllPodsPeer.PodSelector, matchAllPodsPeer.NamespaceSelector, nil, nil)
 		podsPeer := matchAllPeer
 		podsPeer.AddressGroups = append(addressGroups, allPodsGroupUID)
 		return &podsPeer
@@ -638,7 +659,7 @@ func (n *NetworkPolicyController) toAntreaPeer(peers []networkingv1.NetworkPolic
 			}
 			ipBlocks = append(ipBlocks, *ipBlock)
 		} else {
-			normalizedUID := n.createAddressGroup(np.Namespace, peer.PodSelector, peer.NamespaceSelector, nil)
+			normalizedUID := n.createAddressGroup(np.Namespace, peer.PodSelector, peer.NamespaceSelector, nil, nil)
 			addressGroups = append(addressGroups, normalizedUID)
 		}
 	}
@@ -1043,6 +1064,11 @@ func (n *NetworkPolicyController) syncAddressGroup(key string) error {
 		utilsets.MergeString(addrGroupNodeNames, internalNP.SpanMeta.NodeNames)
 	}
 	memberSet := n.getAddressGroupMemberSet(addressGroup)
+	if addressGroup.Selector.NodeSelector != nil {
+		ms, _ := n.addNodeSelectorMemberSet(addressGroup.Selector.NodeSelector)
+		memberSet = memberSet.Union(ms)
+		// TODO: AddressGroup shouldn't contain PodIP and NodeIP at the same time to avoid complexity.
+	}
 	updatedAddressGroup := &antreatypes.AddressGroup{
 		Name:         addressGroup.Name,
 		UID:          addressGroup.UID,
@@ -1053,6 +1079,18 @@ func (n *NetworkPolicyController) syncAddressGroup(key string) error {
 	klog.V(2).Infof("Updating existing AddressGroup %s with %d Pods/ExternalEntities and %d Nodes", key, len(memberSet), addrGroupNodeNames.Len())
 	n.addressGroupStore.Update(updatedAddressGroup)
 	return nil
+}
+
+func (c *NetworkPolicyController) addNodeSelectorMemberSet(selector labels.Selector) (controlplane.GroupMemberSet, sets.String) {
+	groupMemberSet := controlplane.GroupMemberSet{}
+	nodes, _ := c.nodeLister.List(selector)
+	nList := sets.String{}
+	for _, node := range nodes {
+		groupMemberSet.Insert(nodeToGroupMember(node))
+		nList.Insert(node.Name)
+	}
+	klog.V(2).InfoS("Select node", "nList", nList, "groupMemberSet", groupMemberSet, "selector", selector)
+	return groupMemberSet, nList
 }
 
 // getAddressGroupMemberSet knows how to construct a GroupMemberSet that contains
@@ -1144,6 +1182,21 @@ func podToGroupMember(pod *v1.Pod, includeIP bool) *controlplane.GroupMember {
 	}
 	memberPod.Pod = &podRef
 	return memberPod
+}
+
+func nodeToGroupMember(node *v1.Node) *controlplane.GroupMember {
+	member := &controlplane.GroupMember{}
+	nodeIPs, err := k8s.GetNodeAddrs(node)
+	if err != nil {
+		return nil
+	}
+	if nodeIPs.IPv4 != nil {
+		member.IPs = append(member.IPs, ipStrToIPAddress(nodeIPs.IPv4.String()))
+	}
+	if nodeIPs.IPv6 != nil {
+		member.IPs = append(member.IPs, ipStrToIPAddress(nodeIPs.IPv6.String()))
+	}
+	return member
 }
 
 func externalEntityToGroupMember(ee *v1alpha2.ExternalEntity) *controlplane.GroupMember {

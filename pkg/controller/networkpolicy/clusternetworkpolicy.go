@@ -15,6 +15,8 @@
 package networkpolicy
 
 import (
+	"reflect"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -27,6 +29,7 @@ import (
 	"antrea.io/antrea/pkg/controller/grouping"
 	"antrea.io/antrea/pkg/controller/networkpolicy/store"
 	antreatypes "antrea.io/antrea/pkg/controller/types"
+	"antrea.io/antrea/pkg/util/k8s"
 	utilsets "antrea.io/antrea/pkg/util/sets"
 )
 
@@ -253,6 +256,86 @@ func (n *NetworkPolicyController) deleteNamespace(old interface{}) {
 		}
 		n.reprocessCNP(cnp, false)
 	}
+}
+
+func (c *NetworkPolicyController) filterAGsFromNodeLabels(node *v1.Node) sets.String {
+	ags := sets.NewString()
+	addressGroupObjs, _ := c.addressGroupStore.GetByIndex(store.IsNodeAddressGroupIndex, store.IsNodeAddressGroupIndex)
+	for _, addressGroupObj := range addressGroupObjs {
+		addressGroup := addressGroupObj.(*antreatypes.AddressGroup)
+		nodeSelector := addressGroup.Selector.NodeSelector
+		if nodeSelector.Matches(labels.Set(node.GetLabels())) {
+			ags.Insert(addressGroup.Name)
+		}
+	}
+	return ags
+}
+
+func (c *NetworkPolicyController) addNode(obj interface{}) {
+	node := obj.(*v1.Node)
+	affectedAGs := c.filterAGsFromNodeLabels(node)
+	for _, key := range affectedAGs.List() {
+		c.enqueueAddressGroup(key)
+	}
+	klog.V(2).InfoS("Processed Node CREATE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
+}
+
+func (c *NetworkPolicyController) deleteNode(obj interface{}) {
+	node, ok := obj.(*v1.Node)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			klog.ErrorS(nil, "Processed Node DELETE event error", "obj", obj)
+			return
+		}
+		node, ok = tombstone.Obj.(*v1.Node)
+		if !ok {
+			klog.ErrorS(nil, "Processed Node DELETE event error", "obj", tombstone.Obj)
+			return
+		}
+	}
+	// enqueue affected address group
+	affectedAGs := c.filterAGsFromNodeLabels(node)
+	for _, key := range affectedAGs.List() {
+		c.enqueueAddressGroup(key)
+	}
+	klog.V(2).InfoS("Processed Node DELETE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
+}
+
+func nodeIPChanged(oldNode, newNode *v1.Node) (bool, error) {
+	oldIPs, err := k8s.GetNodeAddrs(oldNode)
+	if err != nil {
+		return false, err
+	}
+	newIPs, err := k8s.GetNodeAddrs(newNode)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(newIPs, oldIPs), nil
+}
+
+func (c *NetworkPolicyController) updateNode(oldObj, newObj interface{}) {
+	node := newObj.(*v1.Node)
+	oldNode := oldObj.(*v1.Node)
+	ipChanged, err := nodeIPChanged(oldNode, node)
+	if err != nil {
+		klog.ErrorS(err, "Processed Node UPDATE error", "nodeName", node.Name)
+		return
+	}
+	if reflect.DeepEqual(node.GetLabels(), oldNode.GetLabels()) && !ipChanged {
+		klog.V(2).InfoS("Processed Node UPDATE event, labels not changed", "nodeName", node.Name)
+		return
+	}
+	oldMatches, newMatches := c.filterAGsFromNodeLabels(oldNode), c.filterAGsFromNodeLabels(node)
+	if oldMatches.Equal(newMatches) && !ipChanged {
+		klog.V(2).InfoS("Processed Node UPDATE event, affectedAGs not changed", "nodeName", node.Name)
+		return
+	}
+	affectedAGs := oldMatches.Union(newMatches)
+	for _, key := range affectedAGs.List() {
+		c.enqueueAddressGroup(key)
+	}
+	klog.V(2).InfoS("Processed Node UPDATE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
 }
 
 // processClusterNetworkPolicy creates an internal NetworkPolicy instance
