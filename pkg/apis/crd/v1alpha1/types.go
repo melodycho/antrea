@@ -15,7 +15,6 @@
 package v1alpha1
 
 import (
-	_ "github.com/golang/mock/mockgen/model"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -436,8 +435,8 @@ type NetworkPolicyPeer struct {
 	//  Wildcard expressions, i.e. "*wayfair.com".
 	FQDN string `json:"fqdn,omitempty"`
 	// Select certain Nodes which match the label selector,
-	// if no nodeSelector is specified, then all Nodes will be selected
-	// in the cluster.
+	// if no nodeSelector is specified, then no additional Nodes IPs will be added
+	// in egress/ingress rules.
 	// +optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
 }
