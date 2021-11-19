@@ -1100,7 +1100,7 @@ spec:
 
 ## Node Selector 
 
-NodeSelector selects certain Nodes which match the label selector.Add Node IPs to address group memberSet.
+NodeSelector selects certain Nodes which match the label selector. Add Node IPs to address group memberSet.
 The following rule applied to Pods with label `app=antrea-test-app` and will `Drop` egress traffic to 
 Nodes which has labels `kubernetes.io/hostname=kind-control-plane`.
 ```yaml

@@ -298,6 +298,11 @@ func (in *NetworkPolicyPeer) DeepCopyInto(out *NetworkPolicyPeer) {
 		*out = new(v1.LabelSelector)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.NodeSelector != nil {
+		in, out := &in.NodeSelector, &out.NodeSelector
+		*out = new(v1.LabelSelector)
+		(*in).DeepCopyInto(*out)
+	}
 	return
 }
 
