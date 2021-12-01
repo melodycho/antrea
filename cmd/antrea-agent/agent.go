@@ -58,6 +58,8 @@ import (
 	"antrea.io/antrea/pkg/util/cipher"
 	"antrea.io/antrea/pkg/util/k8s"
 	"antrea.io/antrea/pkg/version"
+
+	_ "github.com/golang/mock/mockgen/model"
 )
 
 // informerDefaultResync is the default resync period if a handler doesn't specify one.
@@ -275,7 +277,8 @@ func run(o *Options) error {
 		statusManagerEnabled,
 		loggingEnabled,
 		asyncRuleDeleteInterval,
-		o.config.DNSServerOverride)
+		o.config.DNSServerOverride,
+		nodeInformer)
 	if err != nil {
 		return fmt.Errorf("error creating new NetworkPolicy controller: %v", err)
 	}

@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
+	v1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
@@ -105,6 +106,8 @@ type Controller struct {
 	ifaceStore            interfacestore.InterfaceStore
 	// denyConnStore is for storing deny connections for flow exporter.
 	denyConnStore *connections.DenyConnectionStore
+
+	bpfController *BPFController
 }
 
 // NewNetworkPolicyController returns a new *Controller.
@@ -120,7 +123,8 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 	statusManagerEnabled bool,
 	loggingEnabled bool,
 	asyncRuleDeleteInterval time.Duration,
-	dnsServerOverride string) (*Controller, error) {
+	dnsServerOverride string,
+	nodeInformer v1.NodeInformer) (*Controller, error) {
 	idAllocator := newIDAllocator(asyncRuleDeleteInterval, dnsInterceptRuleID)
 	c := &Controller{
 		antreaClientProvider: antreaClientGetter,
@@ -138,6 +142,9 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 		}
 		if c.ofClient != nil {
 			c.ofClient.RegisterPacketInHandler(uint8(openflow.PacketInReasonNP), "dnsresponse", c.fqdnController)
+		}
+		if c.bpfController, err = NewBPFController(nodeName, nodeInformer); err != nil {
+			return nil, err
 		}
 	}
 	c.reconciler = newReconciler(ofClient, ifaceStore, idAllocator, c.fqdnController, groupCounters)
@@ -448,6 +455,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 			go wait.Until(c.fqdnController.worker, time.Second, stopCh)
 		}
 		go c.fqdnController.runRuleSyncTracker(stopCh)
+		go c.bpfController.Run(stopCh)
 	}
 	klog.Infof("Waiting for all watchers to complete full sync")
 	c.fullSyncGroup.Wait()
@@ -535,21 +543,27 @@ func (c *Controller) syncRule(key string) error {
 		}
 		return nil
 	}
+
 	// If the rule is not realizable, we can simply skip it as it will be marked as dirty
 	// and queued again when we receive the missing group it missed.
 	if !realizable {
 		klog.V(2).InfoS("Rule is not realizable, skipping", "ruleID", key)
 		return nil
 	}
-	err := c.reconciler.Reconcile(rule)
-	if c.fqdnController != nil {
-		// No matter whether the rule reconciliation succeeds or not, fqdnController
-		// needs to be notified of the status.
-		klog.V(2).InfoS("Rule realization was done", "ruleID", key)
-		c.fqdnController.notifyRuleUpdate(key, err)
-	}
-	if err != nil {
-		return err
+	if !rule.HostRule {
+		err := c.reconciler.Reconcile(rule)
+		if c.fqdnController != nil {
+			// No matter whether the rule reconciliation succeeds or not, fqdnController
+			// needs to be notified of the status.
+			klog.V(2).InfoS("Rule realization was done", "ruleID", key)
+			c.fqdnController.notifyRuleUpdate(key, err)
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		klog.InfoS("Sync host rule", "Rule", rule)
+		c.bpfController.queue.Add(rule.Name)
 	}
 	if c.statusManagerEnabled && rule.SourceRef.Type != v1beta2.K8sNetworkPolicy {
 		c.statusManager.SetRuleRealization(key, rule.PolicyUID)

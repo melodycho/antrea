@@ -129,10 +129,15 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 	// either in the spec section or in ingress/egress rules.
 	// The span calculation and stale appliedToGroup cleanup logic would work seamlessly for both cases.
 	appliedToGroupNamesSet := sets.String{}
+
+	hostPolicy := false
 	// Create AppliedToGroup for each AppliedTo present in AntreaNetworkPolicy spec.
 	for _, at := range np.Spec.AppliedTo {
 		appliedToGroupNamesSet.Insert(n.createAppliedToGroup(
-			np.Namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector))
+			np.Namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector, at.NodeSelector))
+		if at.NodeSelector != nil {
+			hostPolicy = true
+		}
 	}
 	rules := make([]controlplane.NetworkPolicyRule, 0, len(np.Spec.Ingress)+len(np.Spec.Egress))
 	// Compute NetworkPolicyRule for Ingress Rule.
@@ -142,7 +147,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 		var appliedToGroupNamesForRule []string
 		// Create AppliedToGroup for each AppliedTo present in the ingress rule.
 		for _, at := range ingressRule.AppliedTo {
-			atGroup := n.createAppliedToGroup(np.Namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector)
+			atGroup := n.createAppliedToGroup(np.Namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector, at.NodeSelector)
 			appliedToGroupNamesForRule = append(appliedToGroupNamesForRule, atGroup)
 			appliedToGroupNamesSet.Insert(atGroup)
 		}
@@ -164,7 +169,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 		var appliedToGroupNamesForRule []string
 		// Create AppliedToGroup for each AppliedTo present in the ingress rule.
 		for _, at := range egressRule.AppliedTo {
-			atGroup := n.createAppliedToGroup(np.Namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector)
+			atGroup := n.createAppliedToGroup(np.Namespace, at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector, at.NodeSelector)
 			appliedToGroupNamesForRule = append(appliedToGroupNamesForRule, atGroup)
 			appliedToGroupNamesSet.Insert(atGroup)
 		}
@@ -201,6 +206,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 		Priority:         &np.Spec.Priority,
 		TierPriority:     &tierPriority,
 		AppliedToPerRule: appliedToPerRule,
+		HostPolicy:       hostPolicy,
 	}
 	return internalNetworkPolicy
 }

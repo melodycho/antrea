@@ -816,6 +816,30 @@ spec:
                             x-kubernetes-preserve-unknown-fields: true
                       group:
                         type: string
+                      nodeSelector:
+                        type: object
+                        properties:
+                          matchExpressions:
+                            items:
+                              properties:
+                                key:
+                                  type: string
+                                operator:
+                                  enum:
+                                    - In
+                                    - NotIn
+                                    - Exists
+                                    - DoesNotExist
+                                  type: string
+                                values:
+                                  items:
+                                    type: string
+                                    pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                  type: array
+                              type: object
+                            type: array
+                          matchLabels:
+                            x-kubernetes-preserve-unknown-fields: true
                 ingress:
                   type: array
                   items:
@@ -879,6 +903,30 @@ spec:
                                   x-kubernetes-preserve-unknown-fields: true
                             group:
                               type: string
+                            nodeSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  items:
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                        type: array
+                                    type: object
+                                  type: array
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
                       # Ensure that Action field allows only ALLOW, DROP and REJECT values
                       action:
                         type: string
@@ -1053,6 +1101,30 @@ spec:
                                   x-kubernetes-preserve-unknown-fields: true
                             group:
                               type: string
+                            nodeSelector:
+                              type: object
+                              properties:
+                                matchExpressions:
+                                  items:
+                                    properties:
+                                      key:
+                                        type: string
+                                      operator:
+                                        enum:
+                                          - In
+                                          - NotIn
+                                          - Exists
+                                          - DoesNotExist
+                                        type: string
+                                      values:
+                                        items:
+                                          type: string
+                                          pattern: "^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$"
+                                        type: array
+                                    type: object
+                                  type: array
+                                matchLabels:
+                                  x-kubernetes-preserve-unknown-fields: true
                       # Ensure that Action field allows only ALLOW, DROP and REJECT values
                       action:
                         type: string

@@ -92,6 +92,8 @@ type rule struct {
 	SourceRef *v1beta.NetworkPolicyReference
 	// EnableLogging is a boolean indicating whether logging is required for Antrea Policies. Always false for K8s NetworkPolicy.
 	EnableLogging bool
+
+	HostRule bool
 }
 
 // hashRule calculates a string based on the rule's content.
@@ -602,6 +604,7 @@ func toRule(r *v1beta.NetworkPolicyRule, policy *v1beta.NetworkPolicy, maxPriori
 		PolicyUID:       policy.UID,
 		SourceRef:       policy.SourceRef,
 		EnableLogging:   r.EnableLogging,
+		HostRule:        policy.HostPolicy,
 	}
 	rule.ID = hashRule(rule)
 	rule.PolicyName = policy.Name
@@ -689,7 +692,9 @@ func (c *ruleCache) updateNetworkPolicyLocked(policy *v1beta.NetworkPolicy) bool
 
 	anyRuleUpdate := false
 	maxPriority := getMaxPriority(policy)
+	klog.InfoS("updateNetworkPolicyLocked", "policy", policy)
 	for i := range policy.Rules {
+		klog.InfoS("updateNetworkPolicyLocked", "rule", policy.Rules[i])
 		r := toRule(&policy.Rules[i], policy, maxPriority)
 		if _, exists := ruleByID[r.ID]; exists {
 			// If rule already exists, remove it from the map so the ones left finally are orphaned.

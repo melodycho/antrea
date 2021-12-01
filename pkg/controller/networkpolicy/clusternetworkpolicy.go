@@ -353,7 +353,7 @@ func (n *NetworkPolicyController) processClusterNetworkPolicy(cnp *crdv1alpha1.C
 			affectedNS, selectors := n.getAffectedNamespacesForAppliedTo(at)
 			affectedNamespaceSelectors = append(affectedNamespaceSelectors, selectors...)
 			for _, ns := range affectedNS {
-				atg := n.createAppliedToGroup(ns, at.PodSelector, nil, at.ExternalEntitySelector)
+				atg := n.createAppliedToGroup(ns, at.PodSelector, nil, at.ExternalEntitySelector, at.NodeSelector)
 				atgNamesSet.Insert(atg)
 				clusterAppliedToAffectedNS = append(clusterAppliedToAffectedNS, ns)
 				atgForNamespace = append(atgForNamespace, atg)
@@ -412,7 +412,7 @@ func (n *NetworkPolicyController) processClusterNetworkPolicy(cnp *crdv1alpha1.C
 						affectedNS, selectors := n.getAffectedNamespacesForAppliedTo(at)
 						affectedNamespaceSelectors = append(affectedNamespaceSelectors, selectors...)
 						for _, ns := range affectedNS {
-							atg := n.createAppliedToGroup(ns, at.PodSelector, nil, at.ExternalEntitySelector)
+							atg := n.createAppliedToGroup(ns, at.PodSelector, nil, at.ExternalEntitySelector, at.NodeSelector)
 							atgNamesSet.Insert(atg)
 							klog.V(4).Infof("Adding a new per-namespace rule with appliedTo %v for rule %d of %s", atg, idx, cnp.Name)
 							addRule(n.toNamespacedPeerForCRD(perNSPeers, ns), direction, []string{atg})
@@ -478,7 +478,7 @@ func (n *NetworkPolicyController) processClusterAppliedTo(appliedTo []crdv1alpha
 		if at.Group != "" {
 			atg = n.processAppliedToGroupForCG(at.Group)
 		} else {
-			atg = n.createAppliedToGroup("", at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector)
+			atg = n.createAppliedToGroup("", at.PodSelector, at.NamespaceSelector, at.ExternalEntitySelector, at.NodeSelector)
 		}
 		if atg != "" {
 			appliedToGroupNames = append(appliedToGroupNames, atg)

@@ -178,25 +178,25 @@ MOCKGEN_TARGETS=(
 
 # Command mockgen does not automatically replace variable YEAR with current year
 # like others do, e.g. client-gen.
-current_year=$(date +"%Y")
-sed -i "s/YEAR/${current_year}/g" hack/boilerplate/license_header.raw.txt
-for target in "${MOCKGEN_TARGETS[@]}"; do
-  read -r package interfaces mock_package <<<"${target}"
-  package_name=$(basename "${package}")
-  if [[ "${mock_package}" == "." ]]; then # generate mocks in same package as src
-      $GOPATH/bin/mockgen \
-          -copyright_file hack/boilerplate/license_header.raw.txt \
-          -destination "${package}/mock_${package_name}_test.go" \
-          -package="${package_name}" \
-          "${ANTREA_PKG}/${package}" "${interfaces}"
-  else # generate mocks in subpackage
-      $GOPATH/bin/mockgen \
-          -copyright_file hack/boilerplate/license_header.raw.txt \
-          -destination "${package}/${mock_package}/mock_${package_name}.go" \
-          -package="${mock_package}" \
-          "${ANTREA_PKG}/${package}" "${interfaces}"
-  fi
-done
+#current_year=$(date +"%Y")
+#sed -i "s/YEAR/${current_year}/g" hack/boilerplate/license_header.raw.txt
+#for target in "${MOCKGEN_TARGETS[@]}"; do
+#  read -r package interfaces mock_package <<<"${target}"
+#  package_name=$(basename "${package}")
+#  if [[ "${mock_package}" == "." ]]; then # generate mocks in same package as src
+#      $GOPATH/bin/mockgen \
+#          -copyright_file hack/boilerplate/license_header.raw.txt \
+#          -destination "${package}/mock_${package_name}_test.go" \
+#          -package="${package_name}" \
+#          "${ANTREA_PKG}/${package}" "${interfaces}"
+#  else # generate mocks in subpackage
+#      $GOPATH/bin/mockgen \
+#          -copyright_file hack/boilerplate/license_header.raw.txt \
+#          -destination "${package}/${mock_package}/mock_${package_name}.go" \
+#          -package="${mock_package}" \
+#          "${ANTREA_PKG}/${package}" "${interfaces}"
+#  fi
+#done
 git checkout HEAD -- hack/boilerplate/license_header.raw.txt
 
 # Download vendored modules to the vendor directory so it's easier to

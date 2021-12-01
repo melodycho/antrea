@@ -103,4 +103,6 @@ type NetworkPolicy struct {
 	// to re-calculate affected Namespaces.
 	// It is set only for AntreaClusterNetworkPolicies with per-namespace rules.
 	PerNamespaceSelectors []labels.Selector
+
+	HostPolicy bool
 }

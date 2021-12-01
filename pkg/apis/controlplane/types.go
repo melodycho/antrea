@@ -195,6 +195,9 @@ type NetworkPolicy struct {
 	TierPriority *int32
 	// Reference to the original NetworkPolicy that the internal NetworkPolicy is created for.
 	SourceRef *NetworkPolicyReference
+
+	// HostPolicy ...
+	HostPolicy bool
 }
 
 // Direction defines traffic direction of NetworkPolicyRule.

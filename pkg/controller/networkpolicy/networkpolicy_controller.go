@@ -451,8 +451,8 @@ func getNormalizedUID(name string) string {
 }
 
 // createAppliedToGroup creates an AppliedToGroup object in store if it is not created already.
-func (n *NetworkPolicyController) createAppliedToGroup(npNsName string, pSel, nSel, eSel *metav1.LabelSelector) string {
-	groupSelector := antreatypes.NewGroupSelector(npNsName, pSel, nSel, eSel)
+func (n *NetworkPolicyController) createAppliedToGroup(npNsName string, pSel, nSel, eSel, nodeSelector *metav1.LabelSelector) string {
+	groupSelector := antreatypes.NewGroupSelector(npNsName, pSel, nSel, eSel, nodeSelector)
 	appliedToGroupUID := getNormalizedUID(groupSelector.NormalizedName)
 	// Get or create a AppliedToGroup for the generated UID.
 	// Ignoring returned error (here and elsewhere in this file) as with the
@@ -556,7 +556,7 @@ func toAntreaIPBlock(ipBlock *networkingv1.IPBlock) (*controlplane.IPBlock, erro
 // wherein, it will be either stored as a new Object in case of ADD event or
 // modified and store the updated instance, in case of an UPDATE event.
 func (n *NetworkPolicyController) processNetworkPolicy(np *networkingv1.NetworkPolicy) *antreatypes.NetworkPolicy {
-	appliedToGroupKey := n.createAppliedToGroup(np.Namespace, &np.Spec.PodSelector, nil, nil)
+	appliedToGroupKey := n.createAppliedToGroup(np.Namespace, &np.Spec.PodSelector, nil, nil, nil)
 	appliedToGroupNames := []string{appliedToGroupKey}
 	rules := make([]controlplane.NetworkPolicyRule, 0, len(np.Spec.Ingress)+len(np.Spec.Egress))
 	var ingressRuleExists, egressRuleExists bool
@@ -1260,6 +1260,17 @@ func (n *NetworkPolicyController) syncAppliedToGroup(key string) error {
 		memberSetByNode[extEntity.Spec.ExternalNode] = entitySet
 		appGroupNodeNames.Insert(extEntity.Spec.ExternalNode)
 	}
+	if nodeSelector := appliedToGroup.Selector.NodeSelector; nodeSelector != nil {
+		nodes, err := n.nodeLister.List(nodeSelector)
+		if err != nil {
+			klog.ErrorS(err, "List Nodes error", "selector", nodeSelector)
+		}
+		for _, node := range nodes {
+			memberSetByNode[node.Name] = nil
+			appGroupNodeNames.Insert(node.Name)
+		}
+	}
+
 	updatedAppliedToGroup := &antreatypes.AppliedToGroup{
 		UID:               appliedToGroup.UID,
 		Name:              appliedToGroup.Name,
@@ -1351,6 +1362,7 @@ func (n *NetworkPolicyController) syncInternalNetworkPolicy(key string) error {
 		n.internalNetworkPolicyMutex.Unlock()
 		return fmt.Errorf("internal NetworkPolicy %s not found", key)
 	}
+	hostPolicy := false
 	internalNP := internalNPObj.(*antreatypes.NetworkPolicy)
 	// Maintain a copy of old SpanMeta Nodenames so we can later enqueue Groups
 	// only if it is updated.
@@ -1364,6 +1376,9 @@ func (n *NetworkPolicyController) syncInternalNetworkPolicy(key string) error {
 		}
 		appGroup := appGroupObj.(*antreatypes.AppliedToGroup)
 		utilsets.MergeString(nodeNames, appGroup.SpanMeta.NodeNames)
+		if appGroup.Selector.NodeSelector != nil {
+			hostPolicy = true
+		}
 	}
 	updatedNetworkPolicy := &antreatypes.NetworkPolicy{
 		UID:                   internalNP.UID,
@@ -1377,8 +1392,10 @@ func (n *NetworkPolicyController) syncInternalNetworkPolicy(key string) error {
 		PerNamespaceSelectors: internalNP.PerNamespaceSelectors,
 		SpanMeta:              antreatypes.SpanMeta{NodeNames: nodeNames},
 		Generation:            internalNP.Generation,
+		HostPolicy:            hostPolicy,
 	}
-	klog.V(4).Infof("Updating internal NetworkPolicy %s with %d Nodes", key, nodeNames.Len())
+	klog.InfoS("syncInternalNetworkPolicy", "updatedNetworkPolicy", updatedNetworkPolicy, "hostPolicy", hostPolicy)
+	klog.V(2).Infof("Updating internal NetworkPolicy %s with %d Nodes", key, nodeNames.Len())
 	n.internalNetworkPolicyStore.Update(updatedNetworkPolicy)
 	// Internal NetworkPolicy update is complete. Safe to unlock the
 	// critical section.

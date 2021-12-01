@@ -21,6 +21,8 @@ import (
 
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	statsv1alpha1 "antrea.io/antrea/pkg/apis/stats/v1alpha1"
+
+	_ "github.com/golang/mock/mockgen/model"
 )
 
 // +genclient
@@ -179,6 +181,7 @@ type NetworkPolicyReference struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // NetworkPolicy is the message format of antrea/pkg/controller/types.NetworkPolicy in an API response.
+// NetworkPolicy is the message format of antrea/pkg/controller/types.NetworkPolicy in an API response.
 type NetworkPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
@@ -195,6 +198,9 @@ type NetworkPolicy struct {
 	TierPriority *int32 `json:"tierPriority,omitempty" protobuf:"varint,5,opt,name=tierPriority"`
 	// Reference to the original NetworkPolicy that the internal NetworkPolicy is created for.
 	SourceRef *NetworkPolicyReference `json:"sourceRef,omitempty" protobuf:"bytes,6,opt,name=sourceRef"`
+
+	// HostPolicy ...
+	HostPolicy bool `protobuf:"varint,7,opt,name=hostPolicy"`
 }
 
 // Direction defines traffic direction of NetworkPolicyRule.
