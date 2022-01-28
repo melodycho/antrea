@@ -1,4 +1,4 @@
-// Copyright 2021 Antrea Authors
+// Copyright 2022 Antrea Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package networkpolicy
 
 import (
+	"net"
 	"reflect"
 	"time"
 
@@ -25,11 +26,16 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+
+	"antrea.io/antrea/pkg/agent/bpf"
+	"antrea.io/antrea/pkg/apis/controlplane/v1beta2"
+	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
 )
 
 const (
 	controllerName               = "BPF-Controller"
 	resyncPeriod   time.Duration = 0
+	localInfName                 = "eth0"
 )
 
 type BPFController struct {
@@ -44,6 +50,9 @@ type BPFController struct {
 
 	// ruleCache provides the desired state of NetworkPolicy rules.
 	ruleCache *ruleCache
+
+	bpfIPMap        *bpf.Map
+	bpfProtoPortMap *bpf.Map
 }
 
 func NewBPFController(
@@ -57,6 +66,13 @@ func NewBPFController(
 		nodeListerSynced: nodeInformer.Informer().HasSynced,
 		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "BPF"),
 	}
+
+	bpfMaps, err := initBPFProg(localInfName)
+	if err != nil {
+		return nil, err
+	}
+	c.bpfIPMap = bpfMaps[ipMap]
+	c.bpfProtoPortMap = bpfMaps[protoPortMap]
 
 	nodeInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
@@ -118,6 +134,7 @@ func (c *BPFController) Run(stopCh <-chan struct{}) {
 		go wait.Until(c.worker, time.Second, stopCh)
 	}
 
+	<-stopCh
 }
 
 func (c *BPFController) worker() {
@@ -151,8 +168,66 @@ func (c *BPFController) processNextWorkItem() bool {
 	return true
 }
 
-func (c BPFController) syncRule(key string) error {
+// func ipToHex(ip []byte) string {
+// 	// v1beta2.IPAddress(net.ParseIP("10.10.0.0")
+// 	// 0001 0110 0000 0000 == 16 00 == 22
+// 	return ""
+// }
+//
+// func protoPortToHex(proto v1beta2.Protocol, port int32) string {
+// 	// v1beta2.IPAddress(net.ParseIP("10.10.0.0")
+// 	// 0001 0110 0000 0000 == 16 00 == 22
+// 	return ""
+// }
+
+func (c *BPFController) syncRule(key string) error {
 	klog.InfoS("sync rule", "rule key", key)
-	// rule := ruleCache.GetCompletedRule()
+	rule, _, _ := c.ruleCache.GetCompletedRule(key)
+	if !rule.HostRule {
+		return nil
+	}
+
+	// for _, v := range rule.ToAddresses {
+	// 	for _, ip := range v.IPs {
+	// 		for _, namedPort := range v.Ports {
+	// 			port := namedPort.Port
+	// 			proto := namedPort.Protocol
+	// 			klog.InfoS("", "ip", ip, "port", port, "proto", proto)
+	// 		}
+	// 	}
+	// }
+	for _, v := range rule.FromAddresses {
+		for _, ip := range v.IPs {
+			// ip := net.ParseIP("39.108.219.192")
+			result, err := bpf.IPToHexString(net.IP(ip))
+			if err != nil {
+				return err
+			}
+			if err := c.bpfIPMap.EnsureKey(result); err != nil {
+				return err
+			}
+			klog.InfoS("Add key", "map", c.bpfIPMap.ID, "ip", ip, "hex key", result)
+		}
+
+		for _, namedPort := range v.Ports {
+			port := namedPort.Port
+			proto := namedPort.Protocol
+			var protoNum int32
+			switch proto {
+			case v1beta2.ProtocolTCP:
+				protoNum = v1alpha1.TCPProtocol
+			case v1beta2.ProtocolUDP:
+				protoNum = v1alpha1.UDPProtocol
+			case v1beta2.ProtocolSCTP:
+				protoNum = v1alpha1.SCTPProtocol
+			}
+			result := bpf.ProtoPortToHexString(protoNum, port)
+			if err := c.bpfProtoPortMap.EnsureKey(result); err != nil {
+				return err
+			}
+			klog.InfoS("Add key", "map", c.bpfProtoPortMap.ID, "port", port, "proto", proto, "hex key", result)
+		}
+	}
+
 	return nil
 }
