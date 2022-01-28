@@ -1,5 +1,6 @@
 ARG GO_VERSION
 ARG OVS_VERSION
+FROM calico/bpftool:v5.3-amd64 as bpftool
 FROM golang:${GO_VERSION} as antrea-build
 
 WORKDIR /antrea
@@ -21,3 +22,4 @@ USER root
 
 COPY build/images/scripts/* /usr/local/bin/
 COPY --from=antrea-build /antrea/bin/* /usr/local/bin/
+COPY --from=bpftool /bpftool /usr/local/bin/
