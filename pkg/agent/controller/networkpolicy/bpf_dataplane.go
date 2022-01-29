@@ -9,6 +9,7 @@ import (
 const (
 	ipMap        = "ip"
 	protoPortMap = "proto_port"
+	hook         = "tc.o"
 )
 
 func initBPFProg(infName string) (mapIDs map[string]*bpf.Map, err error) {
@@ -24,7 +25,10 @@ func initBPFProg(infName string) (mapIDs map[string]*bpf.Map, err error) {
 	for _, m := range oldMaps {
 		mapSet.Insert(m.ID)
 	}
-	if err := bpf.AttachBPFProg(infName); err != nil {
+	if err := bpf.AttachClassifier(infName); err != nil {
+		return nil, err
+	}
+	if err := bpf.AttachBPFProg("tc", infName, hook, true); err != nil {
 		return nil, err
 	}
 	newMaps, err := bpf.ListBPFMaps()

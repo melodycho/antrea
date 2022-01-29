@@ -24,19 +24,45 @@ import (
 )
 
 func CreateQDisc(ifName string) error {
+	// tc qdisc add dev eth0 clsact
 	return nil
 }
 
-func AttachClassifier(secName, ifName, hook string, isIngress bool) (int, error) {
-	return 0, nil
+func ShowClassifier(ifName string) error {
+	var cmd *exec.Cmd
+	// tc qdisc show dev eth0
+	cmd = exec.Command("tc", "qdisc", "show", "dev", ifName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		klog.ErrorS(err, "ifName", ifName, "cmd", cmd.String(), "output", string(output), "err", err)
+	}
+	return nil
 }
 
-func AttachBPFProg(ifName string) error {
+func AttachClassifier(ifName string) error {
+	var cmd *exec.Cmd
+	// tc qdisc add dev eth0 clsact
+	cmd = exec.Command("tc", "qdisc", "add", "dev", ifName, "clsact")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		klog.ErrorS(err, "ifName", ifName, "cmd", cmd.String(), "output", string(output))
+		if err := ShowClassifier(ifName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func AttachBPFProg(secName, ifName, hook string, isIngress bool) error {
+	// secName, ifName, hook string, isIngress bool
+	direction := "ingress"
+	if !isIngress {
+		direction = "egress"
+	}
 	var cmd *exec.Cmd
 	// tc filter add dev eth0 egress bps da obj debug_drop_tcp.o sec tc
-	cmd = exec.Command("tc", "filter", "add", "dev", ifName, "ingress", "bps", "da", "obj", "tc.o", "sec", "tc")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("error attaching BPF prog %s: %v", ifName, err)
+	cmd = exec.Command("tc", "filter", "add", "dev", ifName, direction, "bpf", "da", "obj",
+		fmt.Sprintf("/usr/sbin/%s", hook), "sec", secName)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error attaching BPF prog %s, cmd %s, output: %s: %v", ifName, cmd.String(), string(output), err)
 	}
 	return nil
 }

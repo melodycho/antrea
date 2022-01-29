@@ -144,7 +144,8 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 			c.ofClient.RegisterPacketInHandler(uint8(openflow.PacketInReasonNP), "dnsresponse", c.fqdnController)
 		}
 		if c.bpfController, err = NewBPFController(nodeName, nodeInformer); err != nil {
-			return nil, err
+			klog.ErrorS(err, "NewBPFController error")
+			return nil, nil
 		}
 	}
 	c.reconciler = newReconciler(ofClient, ifaceStore, idAllocator, c.fqdnController, groupCounters)
@@ -455,7 +456,10 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 			go wait.Until(c.fqdnController.worker, time.Second, stopCh)
 		}
 		go c.fqdnController.runRuleSyncTracker(stopCh)
-		go c.bpfController.Run(stopCh)
+		if c.bpfController != nil {
+			klog.InfoS("BPF enable.................................")
+			go c.bpfController.Run(stopCh)
+		}
 	}
 	klog.Infof("Waiting for all watchers to complete full sync")
 	c.fullSyncGroup.Wait()

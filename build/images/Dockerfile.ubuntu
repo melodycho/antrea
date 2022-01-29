@@ -9,4 +9,5 @@ USER root
 
 COPY build/images/scripts/* /usr/local/bin/
 COPY bin/* /usr/local/bin/
+COPY bin/*.o /usr/sbin/
 COPY --from=bpftool /bpftool /usr/local/bin/
