@@ -567,6 +567,7 @@ func (c *Controller) syncRule(key string) error {
 		}
 	} else {
 		klog.InfoS("Sync host rule", "Rule", rule)
+		c.bpfController.ruleCache[rule.Name] = rule
 		c.bpfController.queue.Add(rule.Name)
 	}
 	if c.statusManagerEnabled && rule.SourceRef.Type != v1beta2.K8sNetworkPolicy {

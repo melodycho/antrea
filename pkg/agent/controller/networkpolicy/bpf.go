@@ -35,7 +35,7 @@ import (
 const (
 	controllerName               = "BPF-Controller"
 	resyncPeriod   time.Duration = 0
-	localInfName                 = "eth0"
+	localInfName                 = "ens192"
 )
 
 type BPFController struct {
@@ -49,7 +49,7 @@ type BPFController struct {
 	queue workqueue.RateLimitingInterface
 
 	// ruleCache provides the desired state of NetworkPolicy rules.
-	ruleCache *ruleCache
+	ruleCache map[string]*CompletedRule
 
 	bpfIPMap        *bpf.Map
 	bpfProtoPortMap *bpf.Map
@@ -64,6 +64,7 @@ func NewBPFController(
 		nodeInformer:     nodeInformer,
 		nodeLister:       nodeInformer.Lister(),
 		nodeListerSynced: nodeInformer.Informer().HasSynced,
+		ruleCache:        make(map[string]*CompletedRule),
 		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "BPF"),
 	}
 
@@ -163,7 +164,7 @@ func (c *BPFController) processNextWorkItem() bool {
 	} else {
 		// Put the item back on the work queue to handle any transient errors.
 		c.queue.AddRateLimited(key)
-		klog.ErrorS(err, "Syncing consistentHash by ExternalIPPool failed, requeue", "ExternalIPPool", key)
+		klog.ErrorS(err, "Syncing host rule failed, requeue", "key", key)
 	}
 	return true
 }
@@ -182,7 +183,12 @@ func (c *BPFController) processNextWorkItem() bool {
 
 func (c *BPFController) syncRule(key string) error {
 	klog.InfoS("sync rule", "rule key", key)
-	rule, _, _ := c.ruleCache.GetCompletedRule(key)
+	rule, ok := c.ruleCache[key]
+	if !ok {
+		klog.ErrorS(nil, "rule not found in cache", "name", key)
+		return nil
+	}
+	klog.InfoS("Rule info", "rule", rule)
 	if !rule.HostRule {
 		return nil
 	}
@@ -196,6 +202,36 @@ func (c *BPFController) syncRule(key string) error {
 	// 		}
 	// 	}
 	// }
+	for _, b := range rule.From.IPBlocks {
+		klog.InfoS("IPBlocks", "IPBlock", b.String())
+		ip := net.ParseIP("10.176.26.8")
+		result, err := bpf.IPToHexString(ip)
+		if err != nil {
+			return err
+		}
+		if err := c.bpfIPMap.EnsureKey(result); err != nil {
+			return err
+		}
+		klog.InfoS("Add key", "map", c.bpfIPMap.ID, "ip", ip, "hex key", result)
+		for _, namedPort := range rule.Services {
+			port := namedPort.Port.IntVal
+			proto := namedPort.Protocol
+			var protoNum int32
+			switch *proto {
+			case v1beta2.ProtocolTCP:
+				protoNum = v1alpha1.TCPProtocol
+			case v1beta2.ProtocolUDP:
+				protoNum = v1alpha1.UDPProtocol
+			case v1beta2.ProtocolSCTP:
+				protoNum = v1alpha1.SCTPProtocol
+			}
+			result := bpf.ProtoPortToHexString(protoNum, port)
+			if err := c.bpfProtoPortMap.EnsureKey(result); err != nil {
+				return err
+			}
+			klog.InfoS("Add key", "map", c.bpfProtoPortMap.ID, "port", port, "proto", proto, "hex key", result)
+		}
+	}
 	for _, v := range rule.FromAddresses {
 		for _, ip := range v.IPs {
 			// ip := net.ParseIP("39.108.219.192")

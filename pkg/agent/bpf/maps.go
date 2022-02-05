@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+
+	"k8s.io/klog/v2"
 )
 
 type MapFD uint32
@@ -55,7 +57,8 @@ func (m *Map) EnsureKey(key string) error {
 	// bpftool map update id 296  key hex 06 00 88 13 value hex 01
 	mapID := strconv.Itoa(m.ID)
 	cmd = exec.Command("bpftool", "map", "add", "update", "id", mapID, "key", key, "value", "hex", "01")
-	if err := cmd.Run(); err != nil {
+	if output, err := cmd.CombinedOutput(); err != nil {
+		klog.ErrorS(err, "cmd", cmd.String(), "output", string(output))
 		return fmt.Errorf("error add map key %s: %v", key, err)
 	}
 	return nil
