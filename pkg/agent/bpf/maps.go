@@ -54,11 +54,11 @@ type Map struct {
 
 func (m *Map) EnsureKey(key string) error {
 	var cmd *exec.Cmd
-	// bpftool map update id 296  key hex 06 00 88 13 value hex 01
+	// bpftool map update id 296 key hex 06 00 88 13 value hex 01
 	mapID := strconv.Itoa(m.ID)
-	cmd = exec.Command("bpftool", "map", "add", "update", "id", mapID, "key", key, "value", "hex", "01")
+	cmd = exec.Command("bpftool", "map", "update", "id", mapID, "key", "hex", key, "value", "hex", "01")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		klog.ErrorS(err, "cmd", cmd.String(), "output", string(output))
+		klog.ErrorS(err, "cmd", "Command", cmd.String(), "Output", string(output))
 		return fmt.Errorf("error add map key %s: %v", key, err)
 	}
 	return nil

@@ -204,33 +204,33 @@ func (c *BPFController) syncRule(key string) error {
 	// }
 	for _, b := range rule.From.IPBlocks {
 		klog.InfoS("IPBlocks", "IPBlock", b.String())
-		ip := net.ParseIP("10.176.26.8")
-		result, err := bpf.IPToHexString(ip)
-		if err != nil {
+		// ip := net.ParseIP("10.176.26.8")
+		// result, err := bpf.IPToHexString(ip)
+		// if err != nil {
+		// 	return err
+		// }
+		// if err := c.bpfIPMap.EnsureKey(result); err != nil {
+		// 	return err
+		// }
+		// klog.InfoS("Add key", "map", c.bpfIPMap.ID, "ip", ip, "hex key", result)
+	}
+	for _, namedPort := range rule.Services {
+		port := namedPort.Port.IntVal
+		proto := namedPort.Protocol
+		var protoNum int32
+		switch *proto {
+		case v1beta2.ProtocolTCP:
+			protoNum = v1alpha1.TCPProtocol
+		case v1beta2.ProtocolUDP:
+			protoNum = v1alpha1.UDPProtocol
+		case v1beta2.ProtocolSCTP:
+			protoNum = v1alpha1.SCTPProtocol
+		}
+		result := bpf.ProtoPortToHexString(protoNum, port)
+		if err := c.bpfProtoPortMap.EnsureKey(result); err != nil {
 			return err
 		}
-		if err := c.bpfIPMap.EnsureKey(result); err != nil {
-			return err
-		}
-		klog.InfoS("Add key", "map", c.bpfIPMap.ID, "ip", ip, "hex key", result)
-		for _, namedPort := range rule.Services {
-			port := namedPort.Port.IntVal
-			proto := namedPort.Protocol
-			var protoNum int32
-			switch *proto {
-			case v1beta2.ProtocolTCP:
-				protoNum = v1alpha1.TCPProtocol
-			case v1beta2.ProtocolUDP:
-				protoNum = v1alpha1.UDPProtocol
-			case v1beta2.ProtocolSCTP:
-				protoNum = v1alpha1.SCTPProtocol
-			}
-			result := bpf.ProtoPortToHexString(protoNum, port)
-			if err := c.bpfProtoPortMap.EnsureKey(result); err != nil {
-				return err
-			}
-			klog.InfoS("Add key", "map", c.bpfProtoPortMap.ID, "port", port, "proto", proto, "hex key", result)
-		}
+		klog.InfoS("Add key", "map", c.bpfProtoPortMap.ID, "port", port, "proto", proto, "hex key", result)
 	}
 	for _, v := range rule.FromAddresses {
 		for _, ip := range v.IPs {
