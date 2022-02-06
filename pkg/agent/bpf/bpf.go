@@ -70,14 +70,14 @@ func IntToHex(port uint32) (string, error) {
 	return result, nil
 }
 
-func ProtoPortToHexString(proto, port int32) string {
+func ProtoPortToHexString(proto, port int32) []string {
 	prot, _ := IntToHex(uint32(proto))
 	por, _ := IntToHex(uint32(port))
-	return fmt.Sprintf("%s %s %s %s", prot[:2], prot[2:4], por[:2], por[2:4])
+	return []string{prot[:2], prot[2:4], por[:2], por[2:4]}
 
 }
 
-func IPToHexString(ip net.IP) (string, error) {
+func IPToHexString(ip net.IP) ([]string, error) {
 	// hex := strings.TrimPrefix(hexString, "0x")
 	// proto64, err := strconv.ParseUint(hex, 16, 8)
 	// if err != nil {
@@ -87,5 +87,5 @@ func IPToHexString(ip net.IP) (string, error) {
 	ipv4Decimal := IP4toInt(ip)
 
 	ipHexString, _ := IntToHex(uint32(ipv4Decimal))
-	return fmt.Sprintf("%s %s %s %s", ipHexString[:2], ipHexString[2:4], ipHexString[4:6], ipHexString[6:8]), nil
+	return []string{ipHexString[:2], ipHexString[2:4], ipHexString[4:6], ipHexString[6:8]}, nil
 }

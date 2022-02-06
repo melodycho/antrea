@@ -52,14 +52,20 @@ type Map struct {
 	Version    int
 }
 
-func (m *Map) EnsureKey(key string) error {
+func (m *Map) EnsureKey(keys []string) error {
 	var cmd *exec.Cmd
 	// bpftool map update id 296 key hex 06 00 88 13 value hex 01
 	mapID := strconv.Itoa(m.ID)
-	cmd = exec.Command("bpftool", "map", "update", "id", mapID, "key", "hex", key, "value", "hex", "01")
+	// out, err = exec.Command("bpftool", "map", "show", "id", fmt.Sprintf("%v", mapID), "-j").CombinedOutput()
+	// /usr/local/bin/bpftool map update id 95 key 0x06 0x00 0x88 0x13 value 0x01
+	// Error: error parsing byte:
+	//
+	// cmd = exec.Command("bpftool", "map", fmt.Sprintf("update id %s key hex %s value hex 01", mapID, key)) //nolint:gosec
+
+	cmd = exec.Command("bpftool", "map", "update", "id", mapID, "key", "hex", keys[0], keys[1], keys[2], keys[3], "value", "hex", "01")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		klog.ErrorS(err, "cmd", "Command", cmd.String(), "Output", string(output))
-		return fmt.Errorf("error add map key %s: %v", key, err)
+		klog.ErrorS(err, "cmd", "Command", cmd.String(), "Output", string(output), "cmd", cmd)
+		return fmt.Errorf("error add map key %v: %v", keys, err)
 	}
 	return nil
 }
