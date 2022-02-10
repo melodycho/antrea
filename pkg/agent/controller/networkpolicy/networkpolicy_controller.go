@@ -554,6 +554,7 @@ func (c *Controller) syncRule(key string) error {
 		klog.V(2).InfoS("Rule is not realizable, skipping", "ruleID", key)
 		return nil
 	}
+	// bpftool
 	if !rule.HostRule {
 		err := c.reconciler.Reconcile(rule)
 		if c.fqdnController != nil {

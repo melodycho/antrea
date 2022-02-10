@@ -36,6 +36,32 @@ ip_blocklist = {
         .max_entries = 100000,
 };
 
+struct ip4key {
+	__u32 mask;
+	__u32 addr;
+};
+
+union ip4_bpf_lpm_trie_key {
+	struct bpf_lpm_trie_key lpm;
+	struct ip4key ip;
+};
+
+
+struct bpf_map_def SEC("maps") filter_v4 = {
+	.type           = BPF_MAP_TYPE_LPM_TRIE,
+	.key_size       = sizeof(union ip4_bpf_lpm_trie_key),
+	.value_size     = sizeof(struct trie_value),
+	.max_entries    = 10240,
+};
+
+struct trie_value {
+	__u8 prefix[4];
+	__be64 value;
+	int ifindex;
+	int metric;
+	__be32 gw;
+};
+
 
 struct bpf_map_def SEC(
 
@@ -99,6 +125,12 @@ static __inline bool parser_package(void *data_begin, void *data_end) {
         u32 ip_dst = iph->daddr;
 
         int init_val = 1;
+
+        ip4val_to_lpm(&sip, 32, ihdr->saddr);
+
+        if (NULL != bpf_map_lookup_elem(&calico_prefilter_v4, &sip)) {
+            return true;
+        }
 
         u64 *value = bpf_map_lookup_elem(&ip_blocklist, &ip_src);
         if (value) {
