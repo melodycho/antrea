@@ -2,6 +2,11 @@
 
 1. 新增Antrea多集群（Multi-cluster）特性，用户可以在ClusterSet内跨多个集群导入和导出Services、Endpoints，
 在ClusterSet中启用集群间通信：
+Antrea Multi-cluster 基于[Multi-cluster Service API](https://github.com/kubernetes/enhancements/tree/master/keps/sig-multicluster/1645-multi-cluster-services-api)实现了跨集群间的服务通信。
+在Antrea v1.5.0版本中, Antrea引入独立的多集群控制器, 用户可以通过新的ClusterSet自定义资源类型, 定义一个由管理集群和成员集群构成的多集群群组。
+在群组的一个或多个成员集群中,管理员可以创建ServiceExport来导出指定的服务,其他成员集群的多集群控制器会监视并导入来自其他成员的服务和端点, 
+在Pod IP互相可达的情况下, 应用可以像访问普通服务一样访问导入的多集群服务, 从而实现不同成员集群间的服务访问。
+[]()
 进一步了解该特性和功能，请参考：https://github.com/antrea-io/antrea/blob/v1.5.0/docs/multicluster/getting-started.md    
 想了解更多关于多集群架构和设计内容，请参考：https://github.com/antrea-io/antrea/blob/v1.5.0/docs/multicluster/architecture.md
    (#3199, @luolanzone @aravindakidambi @bangqipropel @hjiajing @Dyanngg @suwang48404 @abhiraut) [Alpha]
