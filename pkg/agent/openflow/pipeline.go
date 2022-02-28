@@ -591,10 +591,24 @@ func (c *client) connectionTrackFlows(category cookie.Category) []binding.Flow {
 
 			if c.proxyAll {
 				flows = append(flows,
-					// This flow is used to match the Service traffic from Antrea gateway. The Service traffic from gateway
-					// should enter table serviceConntrackCommitTable, otherwise it will be matched by other flows in
-					// table connectionTrackCommit.
-					ConntrackCommitTable.BuildFlow(priorityHigh).MatchProtocol(proto).
+					// This flow is used to match the first packet of Service connection from Antrea gateway and load CT
+					// mark FromGatewayCTMark to the connection.
+					ConntrackCommitTable.BuildFlow(priorityHigh).
+						MatchProtocol(proto).
+						MatchCTStateNew(true).
+						MatchCTStateTrk(true).
+						MatchCTMark(ServiceCTMark).
+						MatchRegMark(FromGatewayRegMark).
+						Action().CT(true, ServiceConntrackCommitTable.GetID(), ctZone).
+						LoadToCtMark(FromGatewayCTMark).
+						CTDone().
+						Cookie(c.cookieAllocator.Request(category).Raw()).
+						Done(),
+					// This flow is used to match the subsequent packets of Service connection from Antrea gateway.
+					ConntrackCommitTable.BuildFlow(priorityHigh).
+						MatchProtocol(proto).
+						MatchCTStateNew(false).
+						MatchCTStateTrk(true).
 						MatchCTMark(ServiceCTMark).
 						MatchRegMark(FromGatewayRegMark).
 						Action().GotoTable(ServiceConntrackCommitTable.GetID()).
@@ -1337,14 +1351,18 @@ func (c *client) l3FwdServiceDefaultFlowsViaGW(ipProto binding.Protocol, categor
 	gatewayMAC := c.nodeConfig.GatewayConfig.MAC
 
 	flows := []binding.Flow{
-		// This flow is used to match the packets of Service traffic:
-		//	- NodePort/LoadBalancer request packets which pass through Antrea gateway and the Service Endpoint is not on
+		// This generates the default flow to match Service packets, traffic cases include:
+		//  - When Egress is not enabled:
+		//    - Service request packets sourced from Antrea gateway and destined for external Endpoint.
+		//    - Service request packets sourced from local Pods and destined for external Endpoint.
+		//    - Service response packets sourced from local Pods.
 		//    local Pod CIDR or any remote Pod CIDRs.
-		//	- ClusterIP request packets which are from Antrea gateway and the Service Endpoint is not on local Pod CIDR
-		// 	or any remote Pod CIDRs.
-		//  - NodePort/LoadBalancer/ClusterIP response packets.
-		// The matched packets should leave through Antrea gateway, however, they also enter through Antrea gateway. This
-		// is hairpin traffic.
+		//  - When Egress is enabled:
+		//    - Service request packets sourced from Antrea gateway and destined for external Endpoint.
+		//    - Service response packets sourced from local Pods.
+		// Note that, when Egress is enabled, Service request packets sourced from local Pods and destined for external
+		// Endpoint should not be matched by the flow, and such packets should be matched by the flow with higher priority
+		// in L3ForwardingTable, which is installed by Egress.
 		// Skip traffic from AntreaFlexibleIPAM Pods.
 		L3ForwardingTable.BuildFlow(priorityLow).MatchProtocol(ipProto).
 			MatchCTMark(ServiceCTMark).
@@ -2159,10 +2177,13 @@ func (c *client) snatCommonFlows(nodeIP net.IP, localSubnet net.IPNet, localGate
 		// should bypass SNAT too. But it has been covered by the gatewayCT related flow generated in l3FwdFlowToGateway
 		// which forwards all reply traffic for such connections back to the gateway interface with the high priority.
 
-		// Send the traffic to external to SNATTable.
+		// This generates the flow to match the requests packets sourced from local Pods and destined for external, then
+		// forward the packets to SNATTable.
 		L3ForwardingTable.BuildFlow(priorityLow).
 			MatchProtocol(ipProto).
 			MatchRegMark(FromLocalRegMark).
+			MatchCTStateRpl(false).
+			MatchCTStateTrk(true).
 			Action().GotoTable(SNATTable.GetID()).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
 			Done(),
@@ -2171,6 +2192,8 @@ func (c *client) snatCommonFlows(nodeIP net.IP, localSubnet net.IPNet, localGate
 		L3ForwardingTable.BuildFlow(priorityLow).
 			MatchProtocol(ipProto).
 			MatchRegMark(FromTunnelRegMark).
+			MatchCTStateRpl(false).
+			MatchCTStateTrk(true).
 			Action().SetDstMAC(localGatewayMAC).
 			Action().GotoTable(SNATTable.GetID()).
 			Cookie(c.cookieAllocator.Request(category).Raw()).
