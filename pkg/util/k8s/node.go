@@ -17,6 +17,7 @@ package k8s
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -56,4 +57,27 @@ func GetNodeAddrs(node *v1.Node) (*ip.DualStackIPs, error) {
 		}
 	}
 	return nodeAddrs, nil
+}
+
+// GetNodeAddressFromAnnotations gets available IPs from the Node Annotation, the annotations are set by Antrea, includes
+// NodeTransportAddressAnnotationKey string = "node.antrea.io/transport-addresses"
+// NodeAntreaGWAddressAnnotationKey string = "node.antrea.io/gateway-addresses"
+func GetNodeAddressFromAnnotations(node *v1.Node, annotationKey string) (*ip.DualStackIPs, error) {
+	var ipAddrs = new(ip.DualStackIPs)
+	annotationAddrsStr := node.Annotations[annotationKey]
+	if annotationAddrsStr != "" {
+		for _, addr := range strings.Split(annotationAddrsStr, ",") {
+			peerNodeAddr := net.ParseIP(addr)
+			if peerNodeAddr == nil {
+				return nil, fmt.Errorf("invalid annotation for ip-address on Node %s: %s", node.Name, annotationAddrsStr)
+			}
+			if peerNodeAddr.To4() == nil {
+				ipAddrs.IPv6 = peerNodeAddr
+			} else {
+				ipAddrs.IPv4 = peerNodeAddr
+			}
+		}
+		return ipAddrs, nil
+	}
+	return nil, nil
 }

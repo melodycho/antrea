@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
+	"antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/apis/controlplane"
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"antrea.io/antrea/pkg/controller/grouping"
@@ -311,7 +312,15 @@ func nodeIPChanged(oldNode, newNode *v1.Node) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return reflect.DeepEqual(newIPs, oldIPs), nil
+	oldNodeGWIPs, err := k8s.GetNodeAddressFromAnnotations(oldNode, types.NodeAntreaGWAddressAnnotationKey)
+	if err != nil {
+		return false, err
+	}
+	newNodeGWIPs, err := k8s.GetNodeAddressFromAnnotations(newNode, types.NodeAntreaGWAddressAnnotationKey)
+	if err != nil {
+		return false, err
+	}
+	return !reflect.DeepEqual(newIPs, oldIPs) || !reflect.DeepEqual(oldNodeGWIPs, newNodeGWIPs), nil
 }
 
 func (c *NetworkPolicyController) updateNode(oldObj, newObj interface{}) {

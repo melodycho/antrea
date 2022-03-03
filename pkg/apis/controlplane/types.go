@@ -70,7 +70,7 @@ type ExternalEntityReference struct {
 	Namespace string
 }
 
-// GroupMember represents an resource member to be populated in Groups.
+// GroupMember represents a resource member to be populated in Groups.
 type GroupMember struct {
 	// Pod maintains the reference to the Pod.
 	Pod *PodReference

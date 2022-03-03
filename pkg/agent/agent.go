@@ -641,6 +641,20 @@ func (i *Initializer) setupGatewayInterface() error {
 		return err
 	}
 
+	// Update the Node Antrea gateway IP address in Node's annotation.
+	gwIPv4Addr, gwIPv6Addr := i.nodeConfig.GatewayConfig.IPv4, i.nodeConfig.GatewayConfig.IPv6
+	klog.InfoS("Updating Node gateway addresses annotation")
+	var ips []string
+	if gwIPv4Addr != nil {
+		ips = append(ips, gwIPv4Addr.String())
+	}
+	if gwIPv6Addr != nil {
+		ips = append(ips, gwIPv6Addr.String())
+	}
+	if err := i.patchNodeAnnotations(i.nodeConfig.Name, types.NodeAntreaGWAddressAnnotationKey, strings.Join(ips, ",")); err != nil {
+		return err
+	}
+
 	return nil
 }
 

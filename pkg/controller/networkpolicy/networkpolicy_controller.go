@@ -44,6 +44,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
+	types2 "antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/apis/controlplane"
 	secv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha2"
@@ -1034,7 +1035,7 @@ func (n *NetworkPolicyController) processNextAppliedToGroupWorkItem() bool {
 }
 
 // syncAddressGroup retrieves all the internal NetworkPolicies which have a
-// reference to this AddressGroup and updates it's Pod IPAddresses set to
+// reference to this AddressGroup and updates its Pod IPAddresses set to
 // reflect the current state of affected GroupMembers based on the GroupSelector.
 func (n *NetworkPolicyController) syncAddressGroup(key string) error {
 	startTime := time.Now()
@@ -1195,6 +1196,16 @@ func nodeToGroupMember(node *v1.Node) *controlplane.GroupMember {
 	}
 	if nodeIPs.IPv6 != nil {
 		member.IPs = append(member.IPs, ipStrToIPAddress(nodeIPs.IPv6.String()))
+	}
+	gwIPs, err := k8s.GetNodeAddressFromAnnotations(node, types2.NodeAntreaGWAddressAnnotationKey)
+	if err != nil || gwIPs == nil {
+		return member
+	}
+	if nodeIPs.IPv4 != nil {
+		member.IPs = append(member.IPs, ipStrToIPAddress(gwIPs.IPv4.String()))
+	}
+	if nodeIPs.IPv6 != nil {
+		member.IPs = append(member.IPs, ipStrToIPAddress(gwIPs.IPv6.String()))
 	}
 	return member
 }
