@@ -95,7 +95,7 @@ func (n *NetworkPolicyController) toAntreaPeerForCRD(peers []v1alpha1.NetworkPol
 	var ipBlocks []controlplane.IPBlock
 	var fqdns []string
 	for _, peer := range peers {
-		// A v1alpha1.NetworkPolicyPeer will either have an IPBlock or a
+		// A v1alpha1.NetworkPolicyPeer will either have an IPBlock or FQDNs or a
 		// podSelector and/or namespaceSelector set or a reference to the
 		// ClusterGroup.
 		if peer.IPBlock != nil {

@@ -1185,11 +1185,10 @@ func podToGroupMember(pod *v1.Pod, includeIP bool) *controlplane.GroupMember {
 	return memberPod
 }
 
-func nodeToGroupMember(node *v1.Node) *controlplane.GroupMember {
-	member := &controlplane.GroupMember{}
+func nodeToGroupMember(node *v1.Node) (member *controlplane.GroupMember) {
 	nodeIPs, err := k8s.GetNodeAddrs(node)
 	if err != nil {
-		return nil
+		return
 	}
 	if nodeIPs.IPv4 != nil {
 		member.IPs = append(member.IPs, ipStrToIPAddress(nodeIPs.IPv4.String()))
@@ -1199,15 +1198,15 @@ func nodeToGroupMember(node *v1.Node) *controlplane.GroupMember {
 	}
 	gwIPs, err := k8s.GetNodeAddressFromAnnotations(node, types2.NodeAntreaGWAddressAnnotationKey)
 	if err != nil || gwIPs == nil {
-		return member
+		return
 	}
-	if nodeIPs.IPv4 != nil {
+	if gwIPs.IPv4 != nil {
 		member.IPs = append(member.IPs, ipStrToIPAddress(gwIPs.IPv4.String()))
 	}
-	if nodeIPs.IPv6 != nil {
+	if gwIPs.IPv6 != nil {
 		member.IPs = append(member.IPs, ipStrToIPAddress(gwIPs.IPv6.String()))
 	}
-	return member
+	return
 }
 
 func externalEntityToGroupMember(ee *v1alpha2.ExternalEntity) *controlplane.GroupMember {

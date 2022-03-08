@@ -1112,7 +1112,7 @@ spec:
 NodeSelector selects certain Nodes which match the label selector. It adds Node IPs to egress rules in `to` field
 or ingress rules in `from` filed.
 The following rule applies to Pods with label `app=antrea-test-app` and will `Drop` egress traffic to
-Nodes which have the labels `node-role.kubernetes.io/control-plane`.
+Nodes on TCP port 6443 which have the labels `node-role.kubernetes.io/control-plane`.
 
 ```yaml
 apiVersion: crd.antrea.io/v1alpha1

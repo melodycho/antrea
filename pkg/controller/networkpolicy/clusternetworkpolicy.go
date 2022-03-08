@@ -30,6 +30,7 @@ import (
 	"antrea.io/antrea/pkg/controller/grouping"
 	"antrea.io/antrea/pkg/controller/networkpolicy/store"
 	antreatypes "antrea.io/antrea/pkg/controller/types"
+	"antrea.io/antrea/pkg/util/ip"
 	"antrea.io/antrea/pkg/util/k8s"
 	utilsets "antrea.io/antrea/pkg/util/sets"
 )
@@ -303,22 +304,19 @@ func (c *NetworkPolicyController) deleteNode(obj interface{}) {
 	klog.V(2).InfoS("Processed Node DELETE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
 }
 
-func nodeIPChanged(oldNode, newNode *v1.Node) (bool, error) {
-	oldIPs, err := k8s.GetNodeAddrs(oldNode)
-	if err != nil {
-		return false, err
+func nodeIPChanged(oldNode, newNode *v1.Node) (changed bool, err error) {
+	var oldIPs, newIPs, oldNodeGWIPs, newNodeGWIPs *ip.DualStackIPs
+	if oldIPs, err = k8s.GetNodeAddrs(oldNode); err != nil {
+		return
 	}
-	newIPs, err := k8s.GetNodeAddrs(newNode)
-	if err != nil {
-		return false, err
+	if newIPs, err = k8s.GetNodeAddrs(newNode); err != nil {
+		return
 	}
-	oldNodeGWIPs, err := k8s.GetNodeAddressFromAnnotations(oldNode, types.NodeAntreaGWAddressAnnotationKey)
-	if err != nil {
-		return false, err
+	if oldNodeGWIPs, err = k8s.GetNodeAddressFromAnnotations(oldNode, types.NodeAntreaGWAddressAnnotationKey); err != nil {
+		return
 	}
-	newNodeGWIPs, err := k8s.GetNodeAddressFromAnnotations(newNode, types.NodeAntreaGWAddressAnnotationKey)
-	if err != nil {
-		return false, err
+	if newNodeGWIPs, err = k8s.GetNodeAddressFromAnnotations(newNode, types.NodeAntreaGWAddressAnnotationKey); err != nil {
+		return
 	}
 	return !reflect.DeepEqual(newIPs, oldIPs) || !reflect.DeepEqual(oldNodeGWIPs, newNodeGWIPs), nil
 }
