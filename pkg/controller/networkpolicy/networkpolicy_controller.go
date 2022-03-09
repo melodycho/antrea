@@ -1186,6 +1186,7 @@ func podToGroupMember(pod *v1.Pod, includeIP bool) *controlplane.GroupMember {
 }
 
 func nodeToGroupMember(node *v1.Node) (member *controlplane.GroupMember) {
+	member = &controlplane.GroupMember{}
 	nodeIPs, err := k8s.GetNodeAddrs(node)
 	if err != nil {
 		return
