@@ -59,7 +59,7 @@ func GetNodeAddrs(node *v1.Node) (*ip.DualStackIPs, error) {
 	return nodeAddrs, nil
 }
 
-// GetNodeAddressFromAnnotations gets available IPs from the Node Annotation, the annotations are set by Antrea, includes
+// GetNodeAddressFromAnnotations gets available IPs from the Node Annotation.The annotations are set by Antrea, including
 // NodeTransportAddressAnnotationKey string = "node.antrea.io/transport-addresses"
 // NodeAntreaGWAddressAnnotationKey string = "node.antrea.io/gateway-addresses"
 func GetNodeAddressFromAnnotations(node *v1.Node, annotationKey string) (*ip.DualStackIPs, error) {

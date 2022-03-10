@@ -547,8 +547,8 @@ specifies both namespaceSelector and podSelector selects particular Pods within
 particular Namespaces.
 
 **nodeSelector**: This selects particular Nodes in cluster. The selected Node's
-IPs will set as "sources" if `nodeSelector` set in `ingress` section, or as
-"destinations" if set in `egress` section.
+IPs will be set as "sources" if `nodeSelector` set in `ingress` section, or as
+"destinations" if is set in the `egress` section.
 
 **namespaces**: A `namespaces` field allows users to perform advanced matching on
 Namespace objects which cannot be done via label selectors. Currently, the
@@ -1109,8 +1109,10 @@ spec:
 
 ## Node Selector
 
-NodeSelector selects certain Nodes which match the label selector. It adds Node IPs to egress rules in `to` field
-or ingress rules in `from` filed.
+NodeSelector selects certain Nodes which match the label selector.
+When used in the `to` field of an egress rule, it adds the Node IPs to the rule's destination address group;
+when used in the `from` field of an ingress rule, it adds the Node IPs to the rule's source address group.
+
 The following rule applies to Pods with label `app=antrea-test-app` and will `Drop` egress traffic to
 Nodes on TCP port 6443 which have the labels `node-role.kubernetes.io/control-plane`.
 

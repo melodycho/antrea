@@ -50,7 +50,7 @@ type GroupSelector struct {
 	// TODO: Add validation in API to not allow externalEntitySelector and podSelector in the same group.
 	ExternalEntitySelector labels.Selector
 
-	// This is a label selector which selects certain Node IPs. Within a group NodeSelector cannot be set concurrently with
+	// This is a label selector which selects certain Node IPs. Within a group NodeSelector cannot be set together with
 	// other selectors: Namespace/NamespaceSelector/PodSelector/ExternalEntitySelector.
 	NodeSelector labels.Selector
 }
