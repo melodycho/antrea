@@ -24,7 +24,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
-	"antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/apis/controlplane"
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"antrea.io/antrea/pkg/controller/grouping"
@@ -262,7 +261,7 @@ func (n *NetworkPolicyController) deleteNamespace(old interface{}) {
 
 func (c *NetworkPolicyController) filterAGsFromNodeLabels(node *v1.Node) sets.String {
 	ags := sets.NewString()
-	addressGroupObjs, _ := c.addressGroupStore.GetByIndex(store.IsNodeAddressGroupIndex, store.IsNodeAddressGroupIndex)
+	addressGroupObjs, _ := c.addressGroupStore.GetByIndex(store.IsNodeAddressGroupIndex, "true")
 	for _, addressGroupObj := range addressGroupObjs {
 		addressGroup := addressGroupObj.(*antreatypes.AddressGroup)
 		nodeSelector := addressGroup.Selector.NodeSelector
@@ -276,7 +275,7 @@ func (c *NetworkPolicyController) filterAGsFromNodeLabels(node *v1.Node) sets.St
 func (c *NetworkPolicyController) addNode(obj interface{}) {
 	node := obj.(*v1.Node)
 	affectedAGs := c.filterAGsFromNodeLabels(node)
-	for _, key := range affectedAGs.List() {
+	for key := range affectedAGs {
 		c.enqueueAddressGroup(key)
 	}
 	klog.V(2).InfoS("Processed Node CREATE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
@@ -298,49 +297,52 @@ func (c *NetworkPolicyController) deleteNode(obj interface{}) {
 	}
 	// enqueue affected address group
 	affectedAGs := c.filterAGsFromNodeLabels(node)
-	for _, key := range affectedAGs.List() {
+	for key := range affectedAGs {
 		c.enqueueAddressGroup(key)
 	}
 	klog.V(2).InfoS("Processed Node DELETE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
 }
 
-func nodeIPChanged(oldNode, newNode *v1.Node) (changed bool, err error) {
+func nodeIPChanged(oldNode, newNode *v1.Node) (changed bool) {
 	var oldIPs, newIPs, oldNodeGWIPs, newNodeGWIPs *ip.DualStackIPs
+	var err error
 	if oldIPs, err = k8s.GetNodeAddrs(oldNode); err != nil {
-		return
+		return true
 	}
-	if newIPs, err = k8s.GetNodeAddrs(newNode); err != nil {
-		return
+	newIPs, err = k8s.GetNodeAddrs(newNode)
+	if err != nil || !reflect.DeepEqual(newIPs, oldIPs) {
+		return true
 	}
-	if oldNodeGWIPs, err = k8s.GetNodeAddressFromAnnotations(oldNode, types.NodeAntreaGWAddressAnnotationKey); err != nil {
-		return
+	if oldNodeGWIPs, err = k8s.GetNodeGWIPs(oldNode); err != nil {
+		return true
 	}
-	if newNodeGWIPs, err = k8s.GetNodeAddressFromAnnotations(newNode, types.NodeAntreaGWAddressAnnotationKey); err != nil {
-		return
+	if newNodeGWIPs, err = k8s.GetNodeGWIPs(newNode); err != nil {
+		return true
 	}
-	return !reflect.DeepEqual(newIPs, oldIPs) || !reflect.DeepEqual(oldNodeGWIPs, newNodeGWIPs), nil
+	return !reflect.DeepEqual(oldNodeGWIPs, newNodeGWIPs)
 }
 
 func (c *NetworkPolicyController) updateNode(oldObj, newObj interface{}) {
 	node := newObj.(*v1.Node)
 	oldNode := oldObj.(*v1.Node)
-	ipChanged, err := nodeIPChanged(oldNode, node)
-	if err != nil {
-		klog.ErrorS(err, "Processed Node UPDATE error", "nodeName", node.Name)
+	ipChanged := nodeIPChanged(oldNode, node)
+	labelsChanged := !reflect.DeepEqual(node.GetLabels(), oldNode.GetLabels())
+	if !labelsChanged && !ipChanged {
+		klog.V(2).InfoS("Processed Node UPDATE event, labels and IPs not changed", "nodeName", node.Name)
 		return
 	}
-	if reflect.DeepEqual(node.GetLabels(), oldNode.GetLabels()) && !ipChanged {
-		klog.V(2).InfoS("Processed Node UPDATE event, labels not changed", "nodeName", node.Name)
-		return
+
+	affectedAGs := c.filterAGsFromNodeLabels(node)
+	if labelsChanged {
+		oldAGs := c.filterAGsFromNodeLabels(oldNode)
+		if ipChanged {
+			affectedAGs = utilsets.MergeString(affectedAGs, oldAGs)
+		} else {
+			affectedAGs = utilsets.SymmetricDifferenceString(affectedAGs, oldAGs)
+		}
 	}
-	oldMatches, newMatches := c.filterAGsFromNodeLabels(oldNode), c.filterAGsFromNodeLabels(node)
-	if oldMatches.Equal(newMatches) && !ipChanged {
-		klog.V(2).InfoS("Processed Node UPDATE event, affectedAGs not changed", "nodeName", node.Name)
-		return
-	}
-	affectedAGs := oldMatches.Union(newMatches)
-	for _, key := range affectedAGs.List() {
-		c.enqueueAddressGroup(key)
+	for ag := range affectedAGs {
+		c.enqueueAddressGroup(ag)
 	}
 	klog.V(2).InfoS("Processed Node UPDATE event", "nodeName", node.Name, "affectedAGs", affectedAGs.Len())
 }

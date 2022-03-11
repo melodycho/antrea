@@ -3287,7 +3287,6 @@ func TestAddNodeSelector(t *testing.T) {
 	cache.WaitForCacheSync(stopCh, c.groupingInterfaceSynced)
 
 	nodeSelectorA := metav1.LabelSelector{MatchLabels: map[string]string{"env": "pro"}}
-	nodeSelectorB := metav1.LabelSelector{MatchLabels: map[string]string{"env": "test"}}
 
 	fakeNode1 := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "fakeNode0"},
@@ -3309,7 +3308,6 @@ func TestAddNodeSelector(t *testing.T) {
 		return nil
 	}
 	fakeNode1.Labels = nodeSelectorA.MatchLabels
-	fakeNode2.Labels = nodeSelectorB.MatchLabels
 	assert.NoError(t, createNode(fakeNode1))
 	assert.NoError(t, createNode(fakeNode2))
 

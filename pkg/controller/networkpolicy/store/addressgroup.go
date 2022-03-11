@@ -168,7 +168,7 @@ func NewAddressGroupStore() storage.Interface {
 			if !ok || ag.Selector.NodeSelector == nil {
 				return []string{}, nil
 			}
-			return []string{IsNodeAddressGroupIndex}, nil
+			return []string{"true"}, nil
 		},
 	}
 	return ram.NewStore(AddressGroupKeyFunc, indexers, genAddressGroupEvent, keyAndSpanSelectFunc, func() runtime.Object { return new(controlplane.AddressGroup) })

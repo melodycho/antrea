@@ -80,6 +80,8 @@ type GroupMember struct {
 	IPs []IPAddress `json:"ips,omitempty" protobuf:"bytes,3,rep,name=ips"`
 	// Ports is the list NamedPort of the GroupMember.
 	Ports []NamedPort `json:"ports,omitempty" protobuf:"bytes,4,rep,name=ports"`
+	// Node maintains the reference to the Node.
+	Node string `json:"node,omitempty" protobuf:"bytes,5,opt,name=node"`
 }
 
 // +genclient

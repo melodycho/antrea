@@ -19,6 +19,7 @@ import (
 	"net"
 	"strings"
 
+	ip2 "github.com/containernetworking/plugins/pkg/ip"
 	v1 "k8s.io/api/core/v1"
 
 	"antrea.io/antrea/pkg/util/ip"
@@ -61,7 +62,6 @@ func GetNodeAddrs(node *v1.Node) (*ip.DualStackIPs, error) {
 
 // GetNodeAddressFromAnnotations gets available IPs from the Node Annotation.The annotations are set by Antrea, including
 // NodeTransportAddressAnnotationKey string = "node.antrea.io/transport-addresses"
-// NodeAntreaGWAddressAnnotationKey string = "node.antrea.io/gateway-addresses"
 func GetNodeAddressFromAnnotations(node *v1.Node, annotationKey string) (*ip.DualStackIPs, error) {
 	var ipAddrs = new(ip.DualStackIPs)
 	annotationAddrsStr := node.Annotations[annotationKey]
@@ -80,4 +80,42 @@ func GetNodeAddressFromAnnotations(node *v1.Node, annotationKey string) (*ip.Dua
 		return ipAddrs, nil
 	}
 	return nil, nil
+}
+
+// GetNodeGWIPs gets Node Antrea gateway IPs from the Node Spec.
+func GetNodeGWIPs(node *v1.Node) (*ip.DualStackIPs, error) {
+	getIPFromPodCIDR := func(podCIDR string) (*net.IPNet, error) {
+		_, localSubnet, err := net.ParseCIDR(podCIDR)
+		if err != nil || localSubnet == nil {
+			return nil, err
+		}
+		subnetID := localSubnet.IP.Mask(localSubnet.Mask)
+		gwIP := &net.IPNet{IP: ip2.NextIP(subnetID), Mask: localSubnet.Mask}
+		return gwIP, nil
+	}
+	nodeAddrs := new(ip.DualStackIPs)
+	if node.Spec.PodCIDRs != nil {
+		for _, podCIDR := range node.Spec.PodCIDRs {
+			gwIP, err := getIPFromPodCIDR(podCIDR)
+			if err != nil {
+				return nil, err
+			}
+			if gwIP.IP.To4() != nil {
+				nodeAddrs.IPv4 = gwIP.IP
+			} else {
+				nodeAddrs.IPv6 = gwIP.IP
+			}
+		}
+		return nodeAddrs, nil
+	}
+	gwIP, err := getIPFromPodCIDR(node.Spec.PodCIDR)
+	if err != nil {
+		return nil, err
+	}
+	if gwIP.IP.To4() == nil {
+		nodeAddrs.IPv6 = gwIP.IP
+	} else {
+		nodeAddrs.IPv4 = gwIP.IP
+	}
+	return nodeAddrs, nil
 }

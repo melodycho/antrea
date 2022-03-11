@@ -44,7 +44,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	types2 "antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/apis/controlplane"
 	secv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha2"
@@ -498,7 +497,9 @@ func (n *NetworkPolicyController) createAddressGroup(namespace string, podSelect
 	}
 	klog.V(2).Infof("Creating new AddressGroup %s with selector (%s)", addressGroup.Name, addressGroup.Selector.NormalizedName)
 	n.addressGroupStore.Create(addressGroup)
-	n.groupingInterface.AddGroup(addressGroupType, addressGroup.Name, groupSelector)
+	if nodeSelector == nil {
+		n.groupingInterface.AddGroup(addressGroupType, addressGroup.Name, groupSelector)
+	}
 	return normalizedUID
 }
 
@@ -1065,11 +1066,6 @@ func (n *NetworkPolicyController) syncAddressGroup(key string) error {
 		utilsets.MergeString(addrGroupNodeNames, internalNP.SpanMeta.NodeNames)
 	}
 	memberSet := n.getAddressGroupMemberSet(addressGroup)
-	if addressGroup.Selector.NodeSelector != nil {
-		ms, _ := n.addNodeSelectorMemberSet(addressGroup.Selector.NodeSelector)
-		memberSet = memberSet.Union(ms)
-		// TODO: AddressGroup shouldn't contain PodIP and NodeIP at the same time to avoid complexity.
-	}
 	updatedAddressGroup := &antreatypes.AddressGroup{
 		Name:         addressGroup.Name,
 		UID:          addressGroup.UID,
@@ -1082,16 +1078,13 @@ func (n *NetworkPolicyController) syncAddressGroup(key string) error {
 	return nil
 }
 
-func (c *NetworkPolicyController) addNodeSelectorMemberSet(selector labels.Selector) (controlplane.GroupMemberSet, sets.String) {
+func (c *NetworkPolicyController) addNodeSelectorMemberSet(selector labels.Selector) controlplane.GroupMemberSet {
 	groupMemberSet := controlplane.GroupMemberSet{}
 	nodes, _ := c.nodeLister.List(selector)
-	nList := sets.String{}
 	for _, node := range nodes {
 		groupMemberSet.Insert(nodeToGroupMember(node))
-		nList.Insert(node.Name)
 	}
-	klog.V(2).InfoS("Select node", "nList", nList, "groupMemberSet", groupMemberSet, "selector", selector)
-	return groupMemberSet, nList
+	return groupMemberSet
 }
 
 // getAddressGroupMemberSet knows how to construct a GroupMemberSet that contains
@@ -1108,6 +1101,9 @@ func (n *NetworkPolicyController) getAddressGroupMemberSet(g *antreatypes.Addres
 		members, _ := n.getClusterGroupMembers(group)
 		return members
 	}
+	if g.Selector.NodeSelector != nil {
+		return n.addNodeSelectorMemberSet(g.Selector.NodeSelector)
+	}
 	return n.getMemberSetForGroupType(addressGroupType, g.Name)
 }
 
@@ -1117,6 +1113,8 @@ func (n *NetworkPolicyController) getAddressGroupMemberSet(g *antreatypes.Addres
 func (n *NetworkPolicyController) getClusterGroupMembers(group *antreatypes.Group) (controlplane.GroupMemberSet, []controlplane.IPBlock) {
 	if len(group.IPBlocks) > 0 {
 		return nil, group.IPBlocks
+	} else if group.Selector.NodeSelector != nil {
+		return n.addNodeSelectorMemberSet(group.Selector.NodeSelector), nil
 	} else if len(group.ChildGroups) == 0 {
 		return n.getMemberSetForGroupType(clusterGroupType, group.Name), nil
 	}
@@ -1186,7 +1184,7 @@ func podToGroupMember(pod *v1.Pod, includeIP bool) *controlplane.GroupMember {
 }
 
 func nodeToGroupMember(node *v1.Node) (member *controlplane.GroupMember) {
-	member = &controlplane.GroupMember{}
+	member = &controlplane.GroupMember{Node: node.Name}
 	nodeIPs, err := k8s.GetNodeAddrs(node)
 	if err != nil {
 		return
@@ -1197,7 +1195,7 @@ func nodeToGroupMember(node *v1.Node) (member *controlplane.GroupMember) {
 	if nodeIPs.IPv6 != nil {
 		member.IPs = append(member.IPs, ipStrToIPAddress(nodeIPs.IPv6.String()))
 	}
-	gwIPs, err := k8s.GetNodeAddressFromAnnotations(node, types2.NodeAntreaGWAddressAnnotationKey)
+	gwIPs, err := k8s.GetNodeGWIPs(node)
 	if err != nil || gwIPs == nil {
 		return
 	}

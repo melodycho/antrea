@@ -76,6 +76,8 @@ type GroupMember struct {
 	Pod *PodReference
 	// ExternalEntity maintains the reference to the ExternalEntity.
 	ExternalEntity *ExternalEntityReference
+	// Node maintains the reference to the Node.
+	Node string
 	// IP is the IP address of the Endpoints associated with the GroupMember.
 	IPs []IPAddress
 	// Ports is the list NamedPort of the GroupMember.
