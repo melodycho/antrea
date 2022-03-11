@@ -66,7 +66,7 @@ func Transform(reader io.Reader, single bool, opts map[string]string) (interface
 var _ common.TableOutput = new(Response)
 
 func (r Response) GetTableHeader() []string {
-	return []string{"NAME", "POD-IPS", "NODE-IPS"}
+	return []string{"NAME", "POD/NODE-IPS"}
 }
 
 func (r Response) GetPodIPs(maxColumnLength int) string {
@@ -86,7 +86,10 @@ func (r Response) GetNodeIPs(maxColumnLength int) string {
 }
 
 func (r Response) GetTableRow(maxColumnLength int) []string {
-	return []string{r.Name, r.GetPodIPs(maxColumnLength), r.GetNodeIPs(maxColumnLength)}
+	if len(r.Pods) > 0 {
+		return []string{r.Name, r.GetPodIPs(maxColumnLength)}
+	}
+	return []string{r.Name, r.GetNodeIPs(maxColumnLength)}
 }
 
 func (r Response) SortRows() bool {
