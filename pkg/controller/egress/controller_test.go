@@ -26,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
@@ -40,9 +41,10 @@ import (
 	"antrea.io/antrea/pkg/client/clientset/versioned"
 	fakeversioned "antrea.io/antrea/pkg/client/clientset/versioned/fake"
 	crdinformers "antrea.io/antrea/pkg/client/informers/externalversions"
-	"antrea.io/antrea/pkg/controller/egress/store"
 	"antrea.io/antrea/pkg/controller/externalippool"
 	"antrea.io/antrea/pkg/controller/grouping"
+	"antrea.io/antrea/pkg/controller/networkpolicy"
+	"antrea.io/antrea/pkg/controller/networkpolicy/store"
 )
 
 var (
@@ -131,6 +133,7 @@ type egressController struct {
 	crdInformerFactory  crdinformers.SharedInformerFactory
 	groupingController  *grouping.GroupEntityController
 	externalIPAllocator *externalippool.ExternalIPPoolController
+	groupEntityIndex    *grouping.GroupEntityIndex
 }
 
 // objects is an initial set of K8s objects that is exposed through the client.
@@ -140,14 +143,28 @@ func newController(objects, crdObjects []runtime.Object) *egressController {
 	informerFactory := informers.NewSharedInformerFactory(client, resyncPeriod)
 	crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, resyncPeriod)
 	externalIPAllocator := externalippool.NewExternalIPPoolController(crdClient, crdInformerFactory.Crd().V1alpha2().ExternalIPPools())
-	egressGroupStore := store.NewEgressGroupStore()
 	egressInformer := crdInformerFactory.Crd().V1alpha2().Egresses()
 	groupEntityIndex := grouping.NewGroupEntityIndex()
 	groupingController := grouping.NewGroupEntityController(groupEntityIndex,
 		informerFactory.Core().V1().Pods(),
 		informerFactory.Core().V1().Namespaces(),
 		crdInformerFactory.Crd().V1alpha2().ExternalEntities())
-	controller := NewEgressController(crdClient, groupEntityIndex, egressInformer, externalIPAllocator, egressGroupStore)
+	appliedToGroupStore := store.NewAppliedToGroupStore()
+	nplController := networkpolicy.NewNetworkPolicyController(client, crdClient, groupEntityIndex,
+		informerFactory.Core().V1().Namespaces(),
+		informerFactory.Core().V1().Services(),
+		informerFactory.Networking().V1().NetworkPolicies(),
+		informerFactory.Core().V1().Nodes(),
+		crdInformerFactory.Crd().V1alpha1().ClusterNetworkPolicies(),
+		crdInformerFactory.Crd().V1alpha1().NetworkPolicies(),
+		crdInformerFactory.Crd().V1alpha1().Tiers(),
+		crdInformerFactory.Crd().V1alpha3().ClusterGroups(),
+		store.NewAddressGroupStore(),
+		appliedToGroupStore,
+		store.NewNetworkPolicyStore(),
+		store.NewGroupStore())
+	controller := NewEgressController(crdClient, egressInformer, externalIPAllocator, nplController)
+	// Make sure informers are running.
 	return &egressController{
 		controller,
 		client,
@@ -156,6 +173,7 @@ func newController(objects, crdObjects []runtime.Object) *egressController {
 		crdInformerFactory,
 		groupingController,
 		externalIPAllocator,
+		groupEntityIndex,
 	}
 }
 
@@ -164,7 +182,7 @@ func TestAddEgress(t *testing.T) {
 		name                 string
 		inputEgress          *v1alpha2.Egress
 		expectedEgressIP     string
-		expectedEgressGroups map[string]*controlplane.EgressGroup
+		expectedEgressGroups map[string]*controlplane.AppliedToGroup
 	}{
 		{
 			name: "Egress with podSelector and namespaceSelector",
@@ -183,16 +201,16 @@ func TestAddEgress(t *testing.T) {
 				},
 			},
 			expectedEgressIP: "1.1.1.1",
-			expectedEgressGroups: map[string]*controlplane.EgressGroup{
+			expectedEgressGroups: map[string]*controlplane.AppliedToGroup{
 				node1: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "ddb270da-6aec-5ccb-bb4e-d61790f824f9"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo1.Name, Namespace: podFoo1.Namespace}},
 						{Pod: &controlplane.PodReference{Name: podNonIP.Name, Namespace: podNonIP.Namespace}},
 					},
 				},
 				node2: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "ddb270da-6aec-5ccb-bb4e-d61790f824f9"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo2.Name, Namespace: podFoo2.Namespace}},
 					},
@@ -214,9 +232,9 @@ func TestAddEgress(t *testing.T) {
 				},
 			},
 			expectedEgressIP: "1.1.1.1",
-			expectedEgressGroups: map[string]*controlplane.EgressGroup{
+			expectedEgressGroups: map[string]*controlplane.AppliedToGroup{
 				node1: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "e58b2c60-d1d1-579a-95f5-ac42e1621bc4"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo1.Name, Namespace: podFoo1.Namespace}},
 						{Pod: &controlplane.PodReference{Name: podBar1.Name, Namespace: podBar1.Namespace}},
@@ -224,7 +242,7 @@ func TestAddEgress(t *testing.T) {
 					},
 				},
 				node2: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "e58b2c60-d1d1-579a-95f5-ac42e1621bc4"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo2.Name, Namespace: podFoo2.Namespace}},
 					},
@@ -246,9 +264,9 @@ func TestAddEgress(t *testing.T) {
 				},
 			},
 			expectedEgressIP: "1.1.1.1",
-			expectedEgressGroups: map[string]*controlplane.EgressGroup{
+			expectedEgressGroups: map[string]*controlplane.AppliedToGroup{
 				node1: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo1.Name, Namespace: podFoo1.Namespace}},
 						{Pod: &controlplane.PodReference{Name: podFoo1InOtherNamespace.Name, Namespace: podFoo1InOtherNamespace.Namespace}},
@@ -256,7 +274,7 @@ func TestAddEgress(t *testing.T) {
 					},
 				},
 				node2: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo2.Name, Namespace: podFoo2.Namespace}},
 					},
@@ -279,9 +297,9 @@ func TestAddEgress(t *testing.T) {
 				},
 			},
 			expectedEgressIP: "1.1.1.1",
-			expectedEgressGroups: map[string]*controlplane.EgressGroup{
+			expectedEgressGroups: map[string]*controlplane.AppliedToGroup{
 				node1: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo1.Name, Namespace: podFoo1.Namespace}},
 						{Pod: &controlplane.PodReference{Name: podFoo1InOtherNamespace.Name, Namespace: podFoo1InOtherNamespace.Namespace}},
@@ -289,7 +307,7 @@ func TestAddEgress(t *testing.T) {
 					},
 				},
 				node2: {
-					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 					GroupMembers: []controlplane.GroupMember{
 						{Pod: &controlplane.PodReference{Name: podFoo2.Name, Namespace: podFoo2.Namespace}},
 					},
@@ -314,16 +332,18 @@ func TestAddEgress(t *testing.T) {
 			controller.crdInformerFactory.WaitForCacheSync(stopCh)
 			go controller.externalIPAllocator.Run(stopCh)
 			require.True(t, cache.WaitForCacheSync(stopCh, controller.externalIPAllocator.HasSynced))
-			go controller.groupingInterface.Run(stopCh)
+			go controller.groupEntityIndex.Run(stopCh)
 			go controller.groupingController.Run(stopCh)
+
+			go controller.nplController.Run(stopCh)
 			go controller.Run(stopCh)
 
 			controller.crdClient.CrdV1alpha2().Egresses().Create(context.TODO(), tt.inputEgress, metav1.CreateOptions{})
 
 			for nodeName, expectedEgressGroup := range tt.expectedEgressGroups {
-				watcher, err := controller.egressGroupStore.Watch(context.TODO(), "", nil, fields.ParseSelectorOrDie(fmt.Sprintf("nodeName=%s", nodeName)))
+				watcher, err := controller.nplController.AppliedToGroupStore.Watch(context.TODO(), "", labels.SelectorFromSet(labels.Set{string(egressGroupType): ""}), fields.ParseSelectorOrDie(fmt.Sprintf("nodeName=%s", nodeName)))
 				require.NoError(t, err)
-				gotEgressGroup := func() *controlplane.EgressGroup {
+				gotEgressGroup := func() *controlplane.AppliedToGroup {
 					for {
 						select {
 						case <-stopCh:
@@ -332,7 +352,7 @@ func TestAddEgress(t *testing.T) {
 							return nil
 						case event := <-watcher.ResultChan():
 							if event.Type == watch.Added {
-								return event.Object.(*controlplane.EgressGroup)
+								return event.Object.(*controlplane.AppliedToGroup)
 							}
 						}
 					}
@@ -367,8 +387,10 @@ func TestUpdateEgress(t *testing.T) {
 	controller.crdInformerFactory.WaitForCacheSync(stopCh)
 	go controller.externalIPAllocator.Run(stopCh)
 	require.True(t, cache.WaitForCacheSync(stopCh, controller.externalIPAllocator.HasSynced))
-	go controller.groupingInterface.Run(stopCh)
+	go controller.nplController.Run(stopCh)
 	go controller.groupingController.Run(stopCh)
+	go controller.groupEntityIndex.Run(stopCh)
+
 	go controller.Run(stopCh)
 
 	egress := &v1alpha2.Egress{
@@ -385,7 +407,7 @@ func TestUpdateEgress(t *testing.T) {
 	}
 	controller.crdClient.CrdV1alpha2().Egresses().Create(context.TODO(), egress, metav1.CreateOptions{})
 
-	watcher, err := controller.egressGroupStore.Watch(context.TODO(), "", nil, fields.ParseSelectorOrDie(fmt.Sprintf("nodeName=%s", node1)))
+	watcher, err := controller.nplController.AppliedToGroupStore.Watch(context.TODO(), "", labels.SelectorFromSet(labels.Set{string(egressGroupType): ""}), fields.ParseSelectorOrDie(fmt.Sprintf("nodeName=%s", node1)))
 	assert.NoError(t, err)
 
 	getEvent := func() *watch.Event {
@@ -403,33 +425,31 @@ func TestUpdateEgress(t *testing.T) {
 		}
 	}
 
-	gotEgressIP := func() string {
-		var err error
-		egress, err = controller.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
-		if err != nil {
-			return ""
-		}
-		return egress.Spec.EgressIP
+	checkExpectEgressIP := func(expectIP string) error {
+		return wait.Poll(time.Millisecond*100, time.Second, func() (done bool, err error) {
+			egress, err = controller.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
+			return egress.Spec.EgressIP == expectIP, err
+		})
 	}
 
 	assert.Equal(t, &watch.Event{
 		Type: watch.Added,
-		Object: &controlplane.EgressGroup{
-			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+		Object: &controlplane.AppliedToGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 			GroupMembers: []controlplane.GroupMember{
 				{Pod: &controlplane.PodReference{Name: podFoo1.Name, Namespace: podFoo1.Namespace}},
 			},
 		},
 	}, getEvent())
-	assert.Equal(t, "1.1.1.1", gotEgressIP())
+	assert.NoError(t, checkExpectEgressIP("1.1.1.1"))
 	checkExternalIPPoolUsed(t, controller, eipFoo1.Name, 1)
 
 	// Add a Pod matching the Egress's selector and running on this Node.
 	controller.client.CoreV1().Pods(podFoo1InOtherNamespace.Namespace).Create(context.TODO(), podFoo1InOtherNamespace, metav1.CreateOptions{})
 	assert.Equal(t, &watch.Event{
 		Type: watch.Modified,
-		Object: &controlplane.EgressGroupPatch{
-			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+		Object: &controlplane.AppliedToGroupPatch{
+			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 			AddedGroupMembers: []controlplane.GroupMember{
 				{Pod: &controlplane.PodReference{Name: podFoo1InOtherNamespace.Name, Namespace: podFoo1InOtherNamespace.Namespace}},
 			},
@@ -440,8 +460,8 @@ func TestUpdateEgress(t *testing.T) {
 	controller.client.CoreV1().Pods(podFoo1InOtherNamespace.Namespace).Delete(context.TODO(), podFoo1InOtherNamespace.Name, metav1.DeleteOptions{})
 	assert.Equal(t, &watch.Event{
 		Type: watch.Modified,
-		Object: &controlplane.EgressGroupPatch{
-			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+		Object: &controlplane.AppliedToGroupPatch{
+			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 			RemovedGroupMembers: []controlplane.GroupMember{
 				{Pod: &controlplane.PodReference{Name: podFoo1InOtherNamespace.Name, Namespace: podFoo1InOtherNamespace.Namespace}},
 			},
@@ -460,11 +480,11 @@ func TestUpdateEgress(t *testing.T) {
 	controller.crdClient.CrdV1alpha2().Egresses().Update(context.TODO(), egress, metav1.UpdateOptions{})
 	assert.Equal(t, &watch.Event{
 		Type: watch.Deleted,
-		Object: &controlplane.EgressGroup{
-			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+		Object: &controlplane.AppliedToGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "3cbfb7e4-eb32-5bc9-80dc-b98ae7c0d8a0"},
 		},
 	}, getEvent())
-	assert.Equal(t, "2.2.2.10", gotEgressIP())
+	assert.NoError(t, checkExpectEgressIP("2.2.2.10"))
 	checkExternalIPPoolUsed(t, controller, eipFoo1.Name, 0)
 	checkExternalIPPoolUsed(t, controller, eipFoo2.Name, 1)
 
@@ -475,7 +495,7 @@ func TestUpdateEgress(t *testing.T) {
 		return !exists, nil
 	})
 	assert.NoError(t, err, "IP allocation was not deleted after the ExternalIPPool was deleted")
-	assert.Equal(t, "", gotEgressIP(), "EgressIP was not deleted after the ExternalIPPool was deleted")
+	assert.NoError(t, checkExpectEgressIP(""), "EgressIP was not deleted after the ExternalIPPool was deleted")
 
 	// Recreate the ExternalIPPool. An EgressIP should be allocated.
 	controller.crdClient.CrdV1alpha2().ExternalIPPools().Create(context.TODO(), eipFoo2, metav1.CreateOptions{})

@@ -1,4 +1,4 @@
-// Copyright 2021 Antrea Authors
+// Copyright 2022 Antrea Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,10 +36,6 @@ func (c *FakeControlplaneV1beta2) AppliedToGroups() v1beta2.AppliedToGroupInterf
 
 func (c *FakeControlplaneV1beta2) ClusterGroupMembers() v1beta2.ClusterGroupMembersInterface {
 	return &FakeClusterGroupMembers{c}
-}
-
-func (c *FakeControlplaneV1beta2) EgressGroups() v1beta2.EgressGroupInterface {
-	return &FakeEgressGroups{c}
 }
 
 func (c *FakeControlplaneV1beta2) GroupAssociations(namespace string) v1beta2.GroupAssociationInterface {

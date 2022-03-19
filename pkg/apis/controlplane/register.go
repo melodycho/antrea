@@ -58,9 +58,6 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ClusterGroupMembers{},
 		&PaginationGetOptions{},
 		&GroupAssociation{},
-		&EgressGroup{},
-		&EgressGroupPatch{},
-		&EgressGroupList{},
 	)
 	return nil
 }

@@ -134,6 +134,7 @@ MOCKGEN_TARGETS=(
 # Command mockgen does not automatically replace variable YEAR with current year
 # like others do, e.g. client-gen.
 current_year=$(date +"%Y")
+current_year=2021
 sed -i "s/YEAR/${current_year}/g" hack/boilerplate/license_header.raw.txt
 for target in "${MOCKGEN_TARGETS[@]}"; do
   read -r package interfaces mock_package <<<"${target}"

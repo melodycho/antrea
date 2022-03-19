@@ -27,21 +27,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	"antrea.io/antrea/pkg/apis/controlplane"
 	egressv1alpha2 "antrea.io/antrea/pkg/apis/crd/v1alpha2"
-	"antrea.io/antrea/pkg/apiserver/storage"
 	clientset "antrea.io/antrea/pkg/client/clientset/versioned"
 	egressinformers "antrea.io/antrea/pkg/client/informers/externalversions/crd/v1alpha2"
 	egresslisters "antrea.io/antrea/pkg/client/listers/crd/v1alpha2"
 	"antrea.io/antrea/pkg/controller/externalippool"
 	"antrea.io/antrea/pkg/controller/grouping"
-	antreatypes "antrea.io/antrea/pkg/controller/types"
+	"antrea.io/antrea/pkg/controller/networkpolicy"
 )
 
 const (
@@ -81,37 +78,30 @@ type EgressController struct {
 	egressIndexer  cache.Indexer
 	// egressListerSynced is a function which returns true if the Egresses shared informer has been synced at least once.
 	egressListerSynced cache.InformerSynced
-	// egressGroupStore is the storage where the EgressGroups are stored.
-	egressGroupStore storage.Interface
+
 	// queue maintains the EgressGroup objects that need to be synced.
 	queue workqueue.RateLimitingInterface
-	// groupingInterface knows Pods that a given group selects.
-	groupingInterface grouping.Interface
-	// Added as a member to the struct to allow injection for testing.
-	groupingInterfaceSynced func() bool
+
+	nplController *networkpolicy.NetworkPolicyController
 }
 
 // NewEgressController returns a new *EgressController.
 func NewEgressController(crdClient clientset.Interface,
-	groupingInterface grouping.Interface,
 	egressInformer egressinformers.EgressInformer,
 	externalIPAllocator externalippool.ExternalIPAllocator,
-	egressGroupStore storage.Interface) *EgressController {
+	nplController *networkpolicy.NetworkPolicyController) *EgressController {
 	c := &EgressController{
-		crdClient:               crdClient,
-		egressInformer:          egressInformer,
-		egressLister:            egressInformer.Lister(),
-		egressListerSynced:      egressInformer.Informer().HasSynced,
-		egressIndexer:           egressInformer.Informer().GetIndexer(),
-		egressGroupStore:        egressGroupStore,
-		queue:                   workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "egress"),
-		groupingInterface:       groupingInterface,
-		groupingInterfaceSynced: groupingInterface.HasSynced,
-		ipAllocationMap:         map[string]*ipAllocation{},
-		externalIPAllocator:     externalIPAllocator,
+		crdClient:           crdClient,
+		egressInformer:      egressInformer,
+		egressLister:        egressInformer.Lister(),
+		egressListerSynced:  egressInformer.Informer().HasSynced,
+		egressIndexer:       egressInformer.Informer().GetIndexer(),
+		queue:               workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "egress"),
+		ipAllocationMap:     map[string]*ipAllocation{},
+		externalIPAllocator: externalIPAllocator,
+		nplController:       nplController,
 	}
 	// Add handlers for Group events and Egress events.
-	c.groupingInterface.AddEventHandler(egressGroupType, c.enqueueEgressGroup)
 	egressInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    c.addEgress,
@@ -144,7 +134,7 @@ func (c *EgressController) Run(stopCh <-chan struct{}) {
 	klog.Infof("Starting %s", controllerName)
 	defer klog.Infof("Shutting down %s", controllerName)
 
-	cacheSyncs := []cache.InformerSynced{c.egressListerSynced, c.groupingInterfaceSynced, c.externalIPAllocator.HasSynced}
+	cacheSyncs := []cache.InformerSynced{c.egressListerSynced, c.externalIPAllocator.HasSynced}
 	if !cache.WaitForNamedCacheSync(controllerName, stopCh, cacheSyncs...) {
 		return
 	}
@@ -344,47 +334,7 @@ func (c *EgressController) syncEgress(key string) error {
 		return err
 	}
 
-	egressGroupObj, found, _ := c.egressGroupStore.Get(key)
-	if !found {
-		klog.V(2).Infof("EgressGroup %s not found", key)
-		return nil
-	}
-
-	nodeNames := sets.String{}
-	podNum := 0
-	memberSetByNode := make(map[string]controlplane.GroupMemberSet)
-	egressGroup := egressGroupObj.(*antreatypes.EgressGroup)
-	pods, _ := c.groupingInterface.GetEntities(egressGroupType, key)
-	for _, pod := range pods {
-		// Ignore Pod if it's not scheduled or not running. And Egress does not support HostNetwork Pods, so also ignore
-		// Pod if it's HostNetwork Pod.
-		if pod.Spec.NodeName == "" || pod.Spec.HostNetwork {
-			continue
-		}
-		podNum++
-		podSet := memberSetByNode[pod.Spec.NodeName]
-		if podSet == nil {
-			podSet = controlplane.GroupMemberSet{}
-			memberSetByNode[pod.Spec.NodeName] = podSet
-		}
-		groupMember := &controlplane.GroupMember{
-			Pod: &controlplane.PodReference{
-				Name:      pod.Name,
-				Namespace: pod.Namespace,
-			},
-		}
-		podSet.Insert(groupMember)
-		// Update the NodeNames in order to set the SpanMeta for EgressGroup.
-		nodeNames.Insert(pod.Spec.NodeName)
-	}
-	updatedEgressGroup := &antreatypes.EgressGroup{
-		UID:               egressGroup.UID,
-		Name:              egressGroup.Name,
-		GroupMemberByNode: memberSetByNode,
-		SpanMeta:          antreatypes.SpanMeta{NodeNames: nodeNames},
-	}
-	klog.V(2).Infof("Updating existing EgressGroup %s with %d Pods on %d Nodes", key, podNum, nodeNames.Len())
-	c.egressGroupStore.Update(updatedEgressGroup)
+	c.nplController.EnqueueAppliedToGroup(egress.Name)
 	return nil
 }
 
@@ -397,15 +347,7 @@ func (c *EgressController) enqueueEgressGroup(key string) {
 func (c *EgressController) addEgress(obj interface{}) {
 	egress := obj.(*egressv1alpha2.Egress)
 	klog.Infof("Processing Egress %s ADD event with selector (%s)", egress.Name, egress.Spec.AppliedTo)
-	// Create an EgressGroup object corresponding to this Egress and enqueue task to the workqueue.
-	egressGroup := &antreatypes.EgressGroup{
-		Name: egress.Name,
-		UID:  egress.UID,
-	}
-	c.egressGroupStore.Create(egressGroup)
-	// Register the group to the grouping interface.
-	groupSelector := antreatypes.NewGroupSelector("", egress.Spec.AppliedTo.PodSelector, egress.Spec.AppliedTo.NamespaceSelector, nil, nil)
-	c.groupingInterface.AddGroup(egressGroupType, egress.Name, groupSelector)
+	c.nplController.CreateAppliedToGroup("", egress.Spec.AppliedTo.PodSelector, egress.Spec.AppliedTo.NamespaceSelector, nil, egressGroupType, egress.Name)
 	c.queue.Add(egress.Name)
 }
 
@@ -416,9 +358,7 @@ func (c *EgressController) updateEgress(old, cur interface{}) {
 	klog.Infof("Processing Egress %s UPDATE event with selector (%s)", curEgress.Name, curEgress.Spec.AppliedTo)
 	// TODO: Define custom Equal function to be more efficient.
 	if !reflect.DeepEqual(oldEgress.Spec.AppliedTo, curEgress.Spec.AppliedTo) {
-		// Update the group's selector in the grouping interface.
-		groupSelector := antreatypes.NewGroupSelector("", curEgress.Spec.AppliedTo.PodSelector, curEgress.Spec.AppliedTo.NamespaceSelector, nil, nil)
-		c.groupingInterface.AddGroup(egressGroupType, curEgress.Name, groupSelector)
+		c.nplController.CreateAppliedToGroup("", curEgress.Spec.AppliedTo.PodSelector, curEgress.Spec.AppliedTo.NamespaceSelector, nil, egressGroupType, curEgress.Name)
 	}
 	if oldEgress.GetGeneration() != curEgress.GetGeneration() {
 		c.queue.Add(curEgress.Name)
@@ -429,9 +369,7 @@ func (c *EgressController) updateEgress(old, cur interface{}) {
 func (c *EgressController) deleteEgress(obj interface{}) {
 	egress := obj.(*egressv1alpha2.Egress)
 	klog.Infof("Processing Egress %s DELETE event", egress.Name)
-	c.egressGroupStore.Delete(egress.Name)
-	// Unregister the group from the grouping interface.
-	c.groupingInterface.DeleteGroup(egressGroupType, egress.Name)
+	c.nplController.DeleteDereferencedAppliedToGroup(egressGroupType, egress.Name)
 	c.queue.Add(egress.Name)
 }
 

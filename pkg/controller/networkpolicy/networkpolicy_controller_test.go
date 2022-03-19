@@ -181,7 +181,7 @@ func newControllerWithoutEventHandler(k8sObjects, crdObjects []runtime.Object) (
 		cgLister:                   cgInformer.Lister(),
 		cgListerSynced:             cgInformer.Informer().HasSynced,
 		addressGroupStore:          addressGroupStore,
-		appliedToGroupStore:        appliedToGroupStore,
+		AppliedToGroupStore:        appliedToGroupStore,
 		internalNetworkPolicyStore: internalNetworkPolicyStore,
 		internalGroupStore:         internalGroupStore,
 		appliedToGroupQueue:        workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "appliedToGroup"),
@@ -3145,7 +3145,7 @@ func TestGetAppliedToWorkloads(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actualPods, actualEEs := c.getAppliedToWorkloads(tt.inATG)
+			actualPods, actualEEs := c.GetAppliedToWorkloads(tt.inATG)
 			assert.Equal(t, tt.expEEs, actualEEs)
 			assert.Equal(t, tt.expPods, actualPods)
 		})

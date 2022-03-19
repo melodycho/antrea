@@ -41,7 +41,6 @@ import (
 	"antrea.io/antrea/pkg/apiserver/handlers/featuregates"
 	"antrea.io/antrea/pkg/apiserver/handlers/loglevel"
 	"antrea.io/antrea/pkg/apiserver/handlers/webhook"
-	"antrea.io/antrea/pkg/apiserver/registry/controlplane/egressgroup"
 	"antrea.io/antrea/pkg/apiserver/registry/controlplane/nodestatssummary"
 	"antrea.io/antrea/pkg/apiserver/registry/networkpolicy/addressgroup"
 	"antrea.io/antrea/pkg/apiserver/registry/networkpolicy/appliedtogroup"
@@ -132,7 +131,7 @@ type completedConfig struct {
 func NewConfig(
 	genericConfig *genericapiserver.Config,
 	k8sClient kubernetes.Interface,
-	addressGroupStore, appliedToGroupStore, networkPolicyStore, groupStore, egressGroupStore storage.Interface,
+	addressGroupStore, appliedToGroupStore, networkPolicyStore, groupStore storage.Interface,
 	caCertController *certificate.CACertController,
 	statsAggregator *stats.Aggregator,
 	controllerQuerier querier.ControllerQuerier,
@@ -147,7 +146,6 @@ func NewConfig(
 			addressGroupStore:             addressGroupStore,
 			appliedToGroupStore:           appliedToGroupStore,
 			networkPolicyStore:            networkPolicyStore,
-			egressGroupStore:              egressGroupStore,
 			caCertController:              caCertController,
 			statsAggregator:               statsAggregator,
 			controllerQuerier:             controllerQuerier,
@@ -171,7 +169,6 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 	clusterGroupMembershipStorage := clustergroupmember.NewREST(c.extraConfig.networkPolicyController)
 	groupAssociationStorage := groupassociation.NewREST(c.extraConfig.networkPolicyController)
 	nodeStatsSummaryStorage := nodestatssummary.NewREST(c.extraConfig.statsAggregator)
-	egressGroupStorage := egressgroup.NewREST(c.extraConfig.egressGroupStore)
 	cpGroup := genericapiserver.NewDefaultAPIGroupInfo(controlplane.GroupName, Scheme, parameterCodec, Codecs)
 	cpv1beta2Storage := map[string]rest.Storage{}
 	cpv1beta2Storage["addressgroups"] = addressGroupStorage
@@ -181,7 +178,6 @@ func installAPIGroup(s *APIServer, c completedConfig) error {
 	cpv1beta2Storage["nodestatssummaries"] = nodeStatsSummaryStorage
 	cpv1beta2Storage["groupassociations"] = groupAssociationStorage
 	cpv1beta2Storage["clustergroupmembers"] = clusterGroupMembershipStorage
-	cpv1beta2Storage["egressgroups"] = egressGroupStorage
 	cpGroup.VersionedResourcesStorageMap["v1beta2"] = cpv1beta2Storage
 
 	systemGroup := genericapiserver.NewDefaultAPIGroupInfo(system.GroupName, Scheme, metav1.ParameterCodec, Codecs)

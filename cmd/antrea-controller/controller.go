@@ -39,7 +39,6 @@ import (
 	crdinformers "antrea.io/antrea/pkg/client/informers/externalversions"
 	"antrea.io/antrea/pkg/clusteridentity"
 	"antrea.io/antrea/pkg/controller/egress"
-	egressstore "antrea.io/antrea/pkg/controller/egress/store"
 	"antrea.io/antrea/pkg/controller/externalippool"
 	"antrea.io/antrea/pkg/controller/grouping"
 	antreaipam "antrea.io/antrea/pkg/controller/ipam"
@@ -134,7 +133,6 @@ func run(o *Options) error {
 	addressGroupStore := store.NewAddressGroupStore()
 	appliedToGroupStore := store.NewAppliedToGroupStore()
 	networkPolicyStore := store.NewNetworkPolicyStore()
-	egressGroupStore := egressstore.NewEgressGroupStore()
 	groupStore := store.NewGroupStore()
 	groupEntityIndex := grouping.NewGroupEntityIndex()
 	groupEntityController := grouping.NewGroupEntityController(groupEntityIndex, podInformer, namespaceInformer, eeInformer)
@@ -176,7 +174,7 @@ func run(o *Options) error {
 	}
 
 	if features.DefaultFeatureGate.Enabled(features.Egress) {
-		egressController = egress.NewEgressController(crdClient, groupEntityIndex, egressInformer, externalIPPoolController, egressGroupStore)
+		egressController = egress.NewEgressController(crdClient, egressInformer, externalIPPoolController, networkPolicyController)
 	}
 
 	if features.DefaultFeatureGate.Enabled(features.ServiceExternalIP) {
@@ -217,7 +215,6 @@ func run(o *Options) error {
 		appliedToGroupStore,
 		networkPolicyStore,
 		groupStore,
-		egressGroupStore,
 		controllerQuerier,
 		endpointQuerier,
 		networkPolicyController,
@@ -367,7 +364,6 @@ func createAPIServerConfig(kubeconfig string,
 	appliedToGroupStore storage.Interface,
 	networkPolicyStore storage.Interface,
 	groupStore storage.Interface,
-	egressGroupStore storage.Interface,
 	controllerQuerier querier.ControllerQuerier,
 	endpointQuerier networkpolicy.EndpointQuerier,
 	npController *networkpolicy.NetworkPolicyController,
@@ -427,7 +423,6 @@ func createAPIServerConfig(kubeconfig string,
 		appliedToGroupStore,
 		networkPolicyStore,
 		groupStore,
-		egressGroupStore,
 		caCertController,
 		statsAggregator,
 		controllerQuerier,

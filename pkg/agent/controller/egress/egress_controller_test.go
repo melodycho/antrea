@@ -119,23 +119,23 @@ func newFakeController(t *testing.T, initObjects []runtime.Object) *fakeControll
 	podUpdateChannel := channel.NewSubscribableChannel("PodUpdate", 100)
 
 	egressController := &EgressController{
-		ofClient:             mockOFClient,
-		routeClient:          mockRouteClient,
-		crdClient:            crdClient,
-		antreaClientProvider: &antreaClientGetter{clientset},
-		egressInformer:       egressInformer.Informer(),
-		egressLister:         egressInformer.Lister(),
-		egressListerSynced:   egressInformer.Informer().HasSynced,
-		queue:                workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "egressgroup"),
-		localIPDetector:      localIPDetector,
-		ifaceStore:           ifaceStore,
-		nodeName:             fakeNode,
-		idAllocator:          idAllocator,
-		egressGroups:         map[string]sets.String{},
-		egressBindings:       map[string]*egressBinding{},
-		egressStates:         map[string]*egressState{},
-		egressIPStates:       map[string]*egressIPState{},
-		ipAssigner:           mockIPAssigner,
+		ofClient:              mockOFClient,
+		routeClient:           mockRouteClient,
+		crdClient:             crdClient,
+		antreaClientProvider:  &antreaClientGetter{clientset},
+		egressInformer:        egressInformer.Informer(),
+		egressLister:          egressInformer.Lister(),
+		egressListerSynced:    egressInformer.Informer().HasSynced,
+		queue:                 workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "egressgroup"),
+		localIPDetector:       localIPDetector,
+		ifaceStore:            ifaceStore,
+		nodeName:              fakeNode,
+		idAllocator:           idAllocator,
+		egressBindings:        map[string]*egressBinding{},
+		egressStates:          map[string]*egressState{},
+		egressIPStates:        map[string]*egressIPState{},
+		egressAppliedToGroups: map[string]sets.String{},
+		ipAssigner:            mockIPAssigner,
 	}
 	podUpdateChannel.Subscribe(egressController.processPodUpdate)
 	return &fakeController{
@@ -155,8 +155,8 @@ func TestSyncEgress(t *testing.T) {
 		name                string
 		existingEgress      *crdv1a2.Egress
 		newEgress           *crdv1a2.Egress
-		existingEgressGroup *cpv1b2.EgressGroup
-		newEgressGroup      *cpv1b2.EgressGroup
+		existingEgressGroup *cpv1b2.AppliedToGroup
+		newEgressGroup      *cpv1b2.AppliedToGroup
 		newLocalIPs         sets.String
 		expectedEgresses    []*crdv1a2.Egress
 		expectedCalls       func(mockOFClient *openflowtest.MockClient, mockRouteClient *routetest.MockInterface, mockIPAssigner *ipassignertest.MockIPAssigner)
@@ -171,14 +171,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -220,14 +220,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeRemoteEgressIP1},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -268,14 +268,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP2},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -320,14 +320,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeRemoteEgressIP1},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -369,14 +369,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -417,14 +417,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP2},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -468,14 +468,14 @@ func TestSyncEgress(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
 				Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
 			},
-			existingEgressGroup: &cpv1b2.EgressGroup{
+			existingEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
 					{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},
 				},
 			},
-			newEgressGroup: &cpv1b2.EgressGroup{
+			newEgressGroup: &cpv1b2.AppliedToGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
 				GroupMembers: []cpv1b2.GroupMember{
 					{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -552,7 +552,7 @@ func TestPodUpdateShouldSyncEgress(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
 	}
-	egressGroup := &cpv1b2.EgressGroup{
+	egressGroup := &cpv1b2.AppliedToGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 		GroupMembers: []cpv1b2.GroupMember{
 			{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -597,7 +597,7 @@ func TestSyncOverlappingEgress(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
 	}
-	egressGroup1 := &cpv1b2.EgressGroup{
+	egressGroup1 := &cpv1b2.AppliedToGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
 		GroupMembers: []cpv1b2.GroupMember{
 			{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -609,7 +609,7 @@ func TestSyncOverlappingEgress(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
 		Spec:       crdv1a2.EgressSpec{EgressIP: fakeRemoteEgressIP1},
 	}
-	egressGroup2 := &cpv1b2.EgressGroup{
+	egressGroup2 := &cpv1b2.AppliedToGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: "egressB", UID: "uidB"},
 		GroupMembers: []cpv1b2.GroupMember{
 			{Pod: &cpv1b2.PodReference{Name: "pod1", Namespace: "ns1"}},
@@ -621,7 +621,7 @@ func TestSyncOverlappingEgress(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "egressC", UID: "uidC"},
 		Spec:       crdv1a2.EgressSpec{EgressIP: fakeLocalEgressIP1},
 	}
-	egressGroup3 := &cpv1b2.EgressGroup{
+	egressGroup3 := &cpv1b2.AppliedToGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: "egressC", UID: "uidC"},
 		GroupMembers: []cpv1b2.GroupMember{
 			{Pod: &cpv1b2.PodReference{Name: "pod2", Namespace: "ns2"}},

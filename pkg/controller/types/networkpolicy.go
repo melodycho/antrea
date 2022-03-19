@@ -54,6 +54,8 @@ type AppliedToGroup struct {
 	// It will be converted to a slice of GroupMember for transferring according
 	// to client's selection.
 	GroupMemberByNode map[string]controlplane.GroupMemberSet
+
+	Labels map[string]string
 }
 
 // AddressGroup describes a set of addresses used as source or destination of Network Policy rules.

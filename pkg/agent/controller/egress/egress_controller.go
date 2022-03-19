@@ -126,8 +126,8 @@ type EgressController struct {
 	nodeName        string
 	idAllocator     *idAllocator
 
-	egressGroups      map[string]sets.String
-	egressGroupsMutex sync.RWMutex
+	egressAppliedToGroups      map[string]sets.String
+	egressAppliedToGroupsMutex sync.RWMutex
 
 	egressBindings      map[string]*egressBinding
 	egressBindingsMutex sync.RWMutex
@@ -157,23 +157,23 @@ func NewEgressController(
 	podUpdateSubscriber channel.Subscriber,
 ) (*EgressController, error) {
 	c := &EgressController{
-		ofClient:             ofClient,
-		routeClient:          routeClient,
-		antreaClientProvider: antreaClientGetter,
-		crdClient:            crdClient,
-		queue:                workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "egressgroup"),
-		egressInformer:       egressInformer.Informer(),
-		egressLister:         egressInformer.Lister(),
-		egressListerSynced:   egressInformer.Informer().HasSynced,
-		nodeName:             nodeName,
-		ifaceStore:           ifaceStore,
-		egressGroups:         map[string]sets.String{},
-		egressStates:         map[string]*egressState{},
-		egressIPStates:       map[string]*egressIPState{},
-		egressBindings:       map[string]*egressBinding{},
-		localIPDetector:      ipassigner.NewLocalIPDetector(),
-		idAllocator:          newIDAllocator(minEgressMark, maxEgressMark),
-		cluster:              cluster,
+		ofClient:              ofClient,
+		routeClient:           routeClient,
+		antreaClientProvider:  antreaClientGetter,
+		crdClient:             crdClient,
+		queue:                 workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "egressgroup"),
+		egressInformer:        egressInformer.Informer(),
+		egressLister:          egressInformer.Lister(),
+		egressListerSynced:    egressInformer.Informer().HasSynced,
+		nodeName:              nodeName,
+		ifaceStore:            ifaceStore,
+		egressAppliedToGroups: map[string]sets.String{},
+		egressStates:          map[string]*egressState{},
+		egressIPStates:        map[string]*egressIPState{},
+		egressBindings:        map[string]*egressBinding{},
+		localIPDetector:       ipassigner.NewLocalIPDetector(),
+		idAllocator:           newIDAllocator(minEgressMark, maxEgressMark),
+		cluster:               cluster,
 	}
 	ipAssigner, err := ipassigner.NewIPAssigner(nodeTransportInterface, egressDummyDevice)
 	if err != nil {
@@ -667,9 +667,9 @@ func (c *EgressController) syncEgress(egressName string) error {
 
 	// Get a copy of the desired Pods.
 	pods := func() sets.String {
-		c.egressGroupsMutex.RLock()
-		defer c.egressGroupsMutex.RUnlock()
-		pods, exist := c.egressGroups[egressName]
+		c.egressAppliedToGroupsMutex.RLock()
+		defer c.egressAppliedToGroupsMutex.RUnlock()
+		pods, exist := c.egressAppliedToGroups[egressName]
 		if !exist {
 			return nil
 		}
@@ -760,56 +760,57 @@ func (c *EgressController) uninstallPodFlows(egressName string, egressState *egr
 }
 
 func (c *EgressController) watchEgressGroup() {
-	klog.Info("Starting watch for EgressGroup")
+	klog.Info("Starting watch for EgressAppliedToGroup")
 	antreaClient, err := c.antreaClientProvider.GetAntreaClient()
 	if err != nil {
 		klog.Warningf("Failed to get antrea client: %v", err)
 		return
 	}
 	options := metav1.ListOptions{
+		LabelSelector: "egressGroup=",
 		FieldSelector: fields.OneTermEqualSelector("nodeName", c.nodeName).String(),
 	}
-	watcher, err := antreaClient.ControlplaneV1beta2().EgressGroups().Watch(context.TODO(), options)
+	watcher, err := antreaClient.ControlplaneV1beta2().AppliedToGroups().Watch(context.TODO(), options)
 	if err != nil {
-		klog.Warningf("Failed to start watch for EgressGroup: %v", err)
+		klog.Warningf("Failed to start watch for EgressAppliedToGroup: %v", err)
 		return
 	}
 	// Watch method doesn't return error but "emptyWatch" in case of some partial data errors,
 	// e.g. timeout error. Make sure that watcher is not empty and log warning otherwise.
 	if reflect.TypeOf(watcher) == reflect.TypeOf(emptyWatch) {
-		klog.Warning("Failed to start watch for EgressGroup, please ensure antrea service is reachable for the agent")
+		klog.Warning("Failed to start watch for EgressAppliedToGroup, please ensure antrea service is reachable for the agent")
 		return
 	}
 
-	klog.Info("Started watch for EgressGroup")
+	klog.Info("Started watch for EgressAppliedToGroup")
 	eventCount := 0
 	defer func() {
-		klog.Infof("Stopped watch for EgressGroup, total items received: %d", eventCount)
+		klog.Infof("Stopped watch for EgressAppliedToGroup, total items received: %d", eventCount)
 		watcher.Stop()
 	}()
 
 	// First receive init events from the result channel and buffer them until
 	// a Bookmark event is received, indicating that all init events have been
 	// received.
-	var initObjects []*cpv1b2.EgressGroup
+	var initObjects []*cpv1b2.AppliedToGroup
 loop:
 	for {
 		select {
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				klog.Warningf("Result channel for EgressGroup was closed")
+				klog.Warningf("Result channel for EgressAppliedToGroup was closed")
 				return
 			}
 			switch event.Type {
 			case watch.Added:
-				klog.V(2).Infof("Added EgressGroup (%#v)", event.Object)
-				initObjects = append(initObjects, event.Object.(*cpv1b2.EgressGroup))
+				klog.V(2).Infof("Added EgressAppliedToGroup (%#v)", event.Object)
+				initObjects = append(initObjects, event.Object.(*cpv1b2.AppliedToGroup))
 			case watch.Bookmark:
 				break loop
 			}
 		}
 	}
-	klog.Infof("Received %d init events for EgressGroup", len(initObjects))
+	klog.Infof("Received %d init events for EgressAppliedToGroup", len(initObjects))
 
 	eventCount += len(initObjects)
 	c.replaceEgressGroups(initObjects)
@@ -822,14 +823,14 @@ loop:
 			}
 			switch event.Type {
 			case watch.Added:
-				c.addEgressGroup(event.Object.(*cpv1b2.EgressGroup))
-				klog.V(2).Infof("Added EgressGroup (%#v)", event.Object)
+				c.addEgressGroup(event.Object.(*cpv1b2.AppliedToGroup))
+				klog.V(2).Infof("Added EgressAppliedToGroup (%#v)", event.Object)
 			case watch.Modified:
-				c.patchEgressGroup(event.Object.(*cpv1b2.EgressGroupPatch))
-				klog.V(2).Infof("Updated EgressGroup (%#v)", event.Object)
+				c.patchEgressGroup(event.Object.(*cpv1b2.AppliedToGroupPatch))
+				klog.V(2).Infof("Updated EgressAppliedToGroup (%#v)", event.Object)
 			case watch.Deleted:
-				c.deleteEgressGroup(event.Object.(*cpv1b2.EgressGroup))
-				klog.V(2).Infof("Removed EgressGroup (%#v)", event.Object)
+				c.deleteEgressGroup(event.Object.(*cpv1b2.AppliedToGroup))
+				klog.V(2).Infof("Removed EgressAppliedToGroup (%#v)", event.Object)
 			default:
 				klog.Errorf("Unknown event: %v", event)
 				return
@@ -839,12 +840,12 @@ loop:
 	}
 }
 
-func (c *EgressController) replaceEgressGroups(groups []*cpv1b2.EgressGroup) {
-	c.egressGroupsMutex.Lock()
-	defer c.egressGroupsMutex.Unlock()
+func (c *EgressController) replaceEgressGroups(groups []*cpv1b2.AppliedToGroup) {
+	c.egressAppliedToGroupsMutex.Lock()
+	defer c.egressAppliedToGroupsMutex.Unlock()
 
-	oldGroupKeys := make(sets.String, len(c.egressGroups))
-	for key := range c.egressGroups {
+	oldGroupKeys := make(sets.String, len(c.egressAppliedToGroups))
+	for key := range c.egressAppliedToGroups {
 		oldGroupKeys.Insert(key)
 	}
 
@@ -854,51 +855,54 @@ func (c *EgressController) replaceEgressGroups(groups []*cpv1b2.EgressGroup) {
 		for _, member := range group.GroupMembers {
 			pods.Insert(k8s.NamespacedName(member.Pod.Namespace, member.Pod.Name))
 		}
-		prevPods := c.egressGroups[group.Name]
+		prevPods := c.egressAppliedToGroups[group.Name]
 		if pods.Equal(prevPods) {
 			continue
 		}
-		c.egressGroups[group.Name] = pods
+		c.egressAppliedToGroups[group.Name] = pods
 		c.queue.Add(group.Name)
 	}
 
 	for key := range oldGroupKeys {
-		delete(c.egressGroups, key)
+		delete(c.egressAppliedToGroups, key)
 		c.queue.Add(key)
 	}
 }
 
-func (c *EgressController) addEgressGroup(group *cpv1b2.EgressGroup) {
+func (c *EgressController) addEgressGroup(group *cpv1b2.AppliedToGroup) {
 	pods := sets.NewString()
 	for _, member := range group.GroupMembers {
 		pods.Insert(k8s.NamespacedName(member.Pod.Namespace, member.Pod.Name))
 	}
 
-	c.egressGroupsMutex.Lock()
-	defer c.egressGroupsMutex.Unlock()
+	c.egressAppliedToGroupsMutex.Lock()
+	defer c.egressAppliedToGroupsMutex.Unlock()
 
-	c.egressGroups[group.Name] = pods
+	c.egressAppliedToGroups[group.Name] = pods
 	c.queue.Add(group.Name)
 }
 
-func (c *EgressController) patchEgressGroup(patch *cpv1b2.EgressGroupPatch) {
-	c.egressGroupsMutex.Lock()
-	defer c.egressGroupsMutex.Unlock()
+func (c *EgressController) patchEgressGroup(patch *cpv1b2.AppliedToGroupPatch) {
+	c.egressAppliedToGroupsMutex.Lock()
+	defer c.egressAppliedToGroupsMutex.Unlock()
 
 	for _, member := range patch.AddedGroupMembers {
-		c.egressGroups[patch.Name].Insert(k8s.NamespacedName(member.Pod.Namespace, member.Pod.Name))
+		c.egressAppliedToGroups[patch.Name].Insert(k8s.NamespacedName(member.Pod.Namespace, member.Pod.Name))
 
 	}
+
 	for _, member := range patch.RemovedGroupMembers {
-		c.egressGroups[patch.Name].Delete(k8s.NamespacedName(member.Pod.Namespace, member.Pod.Name))
+		c.egressAppliedToGroups[patch.Name].Delete(k8s.NamespacedName(member.Pod.Namespace, member.Pod.Name))
+
 	}
+
 	c.queue.Add(patch.Name)
 }
 
-func (c *EgressController) deleteEgressGroup(group *cpv1b2.EgressGroup) {
-	c.egressGroupsMutex.Lock()
-	defer c.egressGroupsMutex.Unlock()
+func (c *EgressController) deleteEgressGroup(group *cpv1b2.AppliedToGroup) {
+	c.egressAppliedToGroupsMutex.Lock()
+	defer c.egressAppliedToGroupsMutex.Unlock()
 
-	delete(c.egressGroups, group.Name)
+	delete(c.egressAppliedToGroups, group.Name)
 	c.queue.Add(group.Name)
 }
