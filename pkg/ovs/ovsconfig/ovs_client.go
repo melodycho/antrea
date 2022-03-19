@@ -384,7 +384,7 @@ func (br *OVSBridge) CreateTunnelPort(name string, tunnelType TunnelType, ofPort
 // psk is for the pre-shared key of IPsec ESP tunnel. If it is not empty, it
 // will be set to the tunnel port interface options. Flow based IPsec tunnel is
 // not supported, so remoteIP must be provided too when psk is not empty.
-// If externalIDs is not nill, the IDs in it will be added to the port's
+// If externalIDs is not nil, the IDs in it will be added to the port's
 // external_ids.
 func (br *OVSBridge) CreateTunnelPortExt(
 	name string,

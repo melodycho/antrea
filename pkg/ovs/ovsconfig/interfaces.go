@@ -23,6 +23,7 @@ const (
 	VXLANTunnel  = "vxlan"
 	GRETunnel    = "gre"
 	STTTunnel    = "stt"
+	ERSpanTunnel = "erspan"
 
 	OVSDatapathSystem OVSDatapathType = "system"
 	OVSDatapathNetdev OVSDatapathType = "netdev"
