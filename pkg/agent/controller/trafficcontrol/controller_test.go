@@ -446,7 +446,6 @@ func TestTrafficControlControllerPodUpdate(t *testing.T) {
 	state, ok := c.getTcState("tc-mirror")
 	assert.Equal(t, true, ok)
 	assert.Equal(t, tcState{
-		ofPorts:    sets.Int32{},
 		pods:       sets.String{"ns1/pod1": sets.Empty{}},
 		targetPort: uint32(3),
 		returnPort: 0,

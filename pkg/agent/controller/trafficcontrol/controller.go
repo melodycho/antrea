@@ -46,23 +46,33 @@ import (
 )
 
 const (
-	controllerName                     = "TrafficControlController"
-	defaultWorkers                     = 4
-	resyncPeriod                       = 0
-	defaultVXLANTunnelDestinationPort  = int32(4789)
+	controllerName = "TrafficControlController"
+	// Default number of workers processing a TrafficControl change.
+	defaultWorkers = 4
+	// Disable resyncing.
+	resyncPeriod time.Duration = 0
+
+	// Default VXLAN tunnel destination port.
+	defaultVXLANTunnelDestinationPort = int32(4789)
+	// Default Geneve tunnel destination port.
 	defaultGENEVETunnelDestinationPort = int32(6081)
-	portNamePrefixVXLAN                = "vxlan"
-	portNamePrefixGENEVE               = "geneve"
-	portNamePrefixGRE                  = "gre"
-	portNamePrefixERSPAN               = "erspan"
+
+	portNamePrefixVXLAN  = "vxlan"
+	portNamePrefixGENEVE = "geneve"
+	portNamePrefixGRE    = "gre"
+	portNamePrefixERSPAN = "erspan"
 )
 
+// tcState keeps the actual state of a TrafficControl that has been realized.
 type tcState struct {
-	ofPorts    sets.Int32
-	pods       sets.String
+	// The Pods affected by a TrafficControl.
+	pods sets.String
+	// The target port of a TrafficControl.
 	targetPort uint32
+	// The return port of a TrafficControl. Note that, it's only for the TrafficControl whose action is redirect.
 	returnPort uint32
-	appliedTo  v1alpha2.AppliedTo
+	// The rule to filter affected Pods by a
+	appliedTo v1alpha2.AppliedTo
 }
 
 type Controller struct {
@@ -93,9 +103,11 @@ type Controller struct {
 }
 
 func NewTrafficControlController(ofClient openflow.Client,
-	interfaceStore interfacestore.InterfaceStore, ovsBridgeClient ovsconfig.OVSBridgeClient,
+	interfaceStore interfacestore.InterfaceStore,
+	ovsBridgeClient ovsconfig.OVSBridgeClient,
 	tcInformer trafficControlinformers.TrafficControlInformer,
-	podInformer cache.SharedIndexInformer, namespaceInformer coreinformers.NamespaceInformer) *Controller {
+	podInformer cache.SharedIndexInformer,
+	namespaceInformer coreinformers.NamespaceInformer) *Controller {
 	c := &Controller{
 		ofClient:                   ofClient,
 		ovsBridgeClient:            ovsBridgeClient,
@@ -164,7 +176,6 @@ func (c *Controller) addPod(obj interface{}) {
 	for tc := range affectedTCs {
 		c.queue.Add(tc)
 	}
-	return
 }
 
 func (c *Controller) updatePod(oldObj interface{}, obj interface{}) {
@@ -181,7 +192,6 @@ func (c *Controller) updatePod(oldObj interface{}, obj interface{}) {
 			c.queue.Add(tc)
 		}
 	}
-	return
 }
 
 func (c *Controller) deletePod(obj interface{}) {
@@ -191,14 +201,12 @@ func (c *Controller) deletePod(obj interface{}) {
 	for tc := range affectedTCs {
 		c.queue.Add(tc)
 	}
-	return
 }
 
 func (c *Controller) addTC(obj interface{}) {
 	tc := obj.(*v1alpha2.TrafficControl)
 	klog.InfoS("Processing TrafficControl ADD event", "trafficControl", tc.Name, "appliedTo", tc.Spec.AppliedTo)
 	c.queue.Add(tc.Name)
-	return
 }
 
 func (c *Controller) updateTC(oldObj interface{}, obj interface{}) {
@@ -208,14 +216,12 @@ func (c *Controller) updateTC(oldObj interface{}, obj interface{}) {
 	if tc.Generation != oldTC.Generation {
 		c.queue.Add(tc.Name)
 	}
-	return
 }
 
 func (c *Controller) deleteTC(obj interface{}) {
 	tc := obj.(*v1alpha2.TrafficControl)
 	klog.InfoS("Processing TrafficControl DELETE event", "trafficControl", tc.Name, "appliedTo", tc.Spec.AppliedTo)
 	c.queue.Add(tc.Name)
-	return
 }
 
 func (c *Controller) Run(stopCh <-chan struct{}) {
@@ -270,7 +276,6 @@ func (c *Controller) createTcState(tc *v1alpha2.TrafficControl) *tcState {
 	c.tcStatesMutex.Lock()
 	defer c.tcStatesMutex.Unlock()
 	state := &tcState{
-		ofPorts:   sets.NewInt32(),
 		pods:      sets.NewString(),
 		appliedTo: tc.Spec.AppliedTo,
 	}
