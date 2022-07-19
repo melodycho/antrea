@@ -28,7 +28,7 @@ coverage:
       default:
         target: auto
       antrea-unit-tests:
-        target: 45%
+        target: auto
         threshold: 0.1%
         flags:
           - unit-tests
