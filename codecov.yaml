@@ -18,8 +18,8 @@ coverage:
   status:
     patch:
       default:
-        target: auto
-        threshold: 0.1%
+        target: 34.33%
+        threshold: 1%
         base: auto
         only_pulls: true
         flags:
