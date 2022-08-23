@@ -11,13 +11,25 @@ comment:
   after_n_builds: 1
   show_carryforward_flags: true
 
+github_checks:
+  annotations: true
+
 coverage:
   status:
+    patch:
+      default:
+        target: 34.33%
+        threshold: 1%
+        base: auto
+        only_pulls: true
+        flags:
+          - unit-tests
     project:
       default:
         target: auto
       antrea-unit-tests:
         target: auto
+        threshold: 0.1%
         flags:
           - unit-tests
       antrea-integration-tests:
@@ -38,10 +50,11 @@ flag_management:
     carryforward: true
 
 ignore:
-  - "**/testing/mock_*.go"
+  - "**/testing/*.go"
   - "**/mock_*.go"
   - "**/*generate*.go"
   - "pkg/client"
   - "**/pkg/client"
   - "**/*.pb.go"
   - "third_party"
+  - "bincover_run_main_test*"
