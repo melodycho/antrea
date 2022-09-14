@@ -1,6 +1,6 @@
 codecov:
   branch: main
-  require_ci_to_pass: true
+  require_ci_to_pass: no
 
 comment:
   layout: "reach,diff,flags,tree"
@@ -49,11 +49,10 @@ flag_management:
     carryforward: true
 
 ignore:
-  - "**/testing/*.go"
+  - "**/testing/mock_*.go"
   - "**/mock_*.go"
   - "**/*generate*.go"
   - "pkg/client"
   - "**/pkg/client"
   - "**/*.pb.go"
   - "third_party"
-  - "bincover_run_main_test*"
