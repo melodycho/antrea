@@ -87,16 +87,15 @@ func NewLabelIdentityReconciler(
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 func (r *LabelIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	klog.V(2).InfoS("Reconciling Pod for label identity", "pod", req.NamespacedName)
-	var commonArea commonarea.RemoteCommonArea
-	var err error
-	commonArea, r.localClusterID, err = r.commonAreaGetter.GetRemoteCommonAreaAndLocalID()
-	if commonArea == nil {
-		return ctrl.Result{Requeue: true}, err
+	if r.remoteCommonArea == nil {
+		commonArea, localClusterID, err := r.commonAreaGetter.GetRemoteCommonAreaAndLocalID()
+		if commonArea == nil {
+			return ctrl.Result{Requeue: true}, err
+		}
+		r.remoteCommonArea, r.localClusterID = commonArea, localClusterID
 	}
-	r.remoteCommonArea = commonArea
 	var pod v1.Pod
 	var ns v1.Namespace
-
 	if err := r.Client.Get(ctx, req.NamespacedName, &pod); err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(2).InfoS("Pod is deleted", "pod", req.NamespacedName)
