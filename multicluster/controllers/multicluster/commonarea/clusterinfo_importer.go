@@ -33,6 +33,10 @@ import (
 func (r *ResourceImportReconciler) handleResImpUpdateForClusterInfo(ctx context.Context, req ctrl.Request, resImp *mcsv1alpha1.ResourceImport) (ctrl.Result, error) {
 	klog.V(2).InfoS("Reconciling ClusterInfo of ResourceImport", "resourceimport", req.NamespacedName)
 	var err error
+	if resImp.Spec.ClusterInfo == nil {
+		klog.V(2).InfoS("Skip reconciling ResourceImport for ClusterInfo since it has no valid spec", "resourceimport", req.NamespacedName)
+		return ctrl.Result{}, nil
+	}
 	clusterInfo := *resImp.Spec.ClusterInfo
 
 	// If ClusterInfo is from local cluster, skip it.
@@ -71,8 +75,13 @@ func (r *ResourceImportReconciler) handleResImpUpdateForClusterInfo(ctx context.
 func (r *ResourceImportReconciler) handleResImpDeleteForClusterInfo(ctx context.Context, req ctrl.Request, resImp *mcsv1alpha1.ResourceImport) (ctrl.Result, error) {
 	clusterInfoImport, clusterInfoImportName := newClusterInfoImport(req.Name, r.namespace)
 	klog.InfoS("Deleting ClusterInfoImport", "clusterinfoimport", clusterInfoImportName.String())
-	err := r.localClusterClient.Delete(ctx, clusterInfoImport, &client.DeleteOptions{})
-	return ctrl.Result{}, client.IgnoreNotFound(err)
+	err := client.IgnoreNotFound(r.localClusterClient.Delete(ctx, clusterInfoImport, &client.DeleteOptions{}))
+	if err != nil {
+		klog.ErrorS(err, "Failed to delete imported ClusterInfo", "clusterInfo", clusterInfoImportName)
+		return ctrl.Result{}, err
+	}
+	r.installedResImports.Delete(*resImp)
+	return ctrl.Result{}, nil
 }
 
 func newClusterInfoImport(name, namespace string) (*mcsv1alpha1.ClusterInfoImport, types.NamespacedName) {

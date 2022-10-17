@@ -2557,12 +2557,14 @@ func testANPMultipleAppliedTo(t *testing.T, data *TestData, singleRule bool) {
 
 // testAuditLoggingBasic tests that audit logs are generated when egress drop applied
 func testAuditLoggingBasic(t *testing.T, data *TestData) {
+	npRef := "test-log-acnp-deny"
+	ruleName := "DropToZ"
 	builder := &ClusterNetworkPolicySpecBuilder{}
-	builder = builder.SetName("test-log-acnp-deny").
+	builder = builder.SetName(npRef).
 		SetPriority(1.0).
 		SetAppliedToGroup([]ACNPAppliedToSpec{{PodSelector: map[string]string{"pod": "a"}, NSSelector: map[string]string{"ns": namespaces["x"]}}})
 	builder.AddEgress(ProtocolTCP, &p80, nil, nil, nil, nil, nil, nil, nil, nil, map[string]string{"ns": namespaces["z"]},
-		nil, nil, false, nil, crdv1alpha1.RuleActionDrop, "", "", nil)
+		nil, nil, false, nil, crdv1alpha1.RuleActionDrop, "", ruleName, nil)
 	builder.AddEgressLogging()
 
 	acnp, err := k8sUtils.CreateOrUpdateACNP(builder.Get())
@@ -2621,7 +2623,7 @@ func testAuditLoggingBasic(t *testing.T, data *TestData) {
 					}
 					expectedNumEntries += 1
 					// The audit log should contain log entry `... Drop <ofPriority> <x/a IP> <z/* IP> ...`
-					re := regexp.MustCompile(`Drop [0-9]+ ` + srcIPs[i] + ` [0-9]+ ` + dstIPs[j] + ` ` + strconv.Itoa(int(p80)))
+					re := regexp.MustCompile(npRef + ` ` + ruleName + ` Drop [0-9]+ ` + srcIPs[i] + ` [0-9]+ ` + dstIPs[j] + ` ` + strconv.Itoa(int(p80)))
 					if re.MatchString(stdout) {
 						actualNumEntries += 1
 					} else {
@@ -2649,8 +2651,9 @@ func testAuditLoggingEnableNP(t *testing.T, data *TestData) {
 	failOnError(data.updateNamespaceWithAnnotations(namespaces["x"], map[string]string{networkpolicy.EnableNPLoggingAnnotationKey: "true"}), t)
 	// Add a K8s namespaced NetworkPolicy in ns x that allow ingress traffic from
 	// Pod x/b to x/a which default denies other ingress including from Pod x/c to x/a
+	npRef := "allow-x-b-to-x-a"
 	k8sNPBuilder := &NetworkPolicySpecBuilder{}
-	k8sNPBuilder = k8sNPBuilder.SetName(namespaces["x"], "allow-x-b-to-x-a").
+	k8sNPBuilder = k8sNPBuilder.SetName(namespaces["x"], npRef).
 		SetPodSelector(map[string]string{"pod": "a"}).
 		SetTypeIngress().
 		AddIngress(v1.ProtocolTCP, &p80, nil, nil, nil,
@@ -2699,7 +2702,7 @@ func testAuditLoggingEnableNP(t *testing.T, data *TestData) {
 
 		var expectedNumEntries, actualNumEntries int
 		srcPods := []string{namespaces["x"] + "/b", namespaces["x"] + "/c"}
-		expectedLogPrefix := []string{"allow-x-b-to-x-a Allow [0-9]+ ", "K8sNetworkPolicy Drop -1 "}
+		expectedLogPrefix := []string{npRef + " <nil> Allow [0-9]+ ", "K8sNetworkPolicy <nil> Drop <nil> "}
 		destIPs, _ := podIPs[namespaces["x"]+"/a"]
 		for i := 0; i < len(srcPods); i++ {
 			srcIPs, _ := podIPs[srcPods[i]]
@@ -3164,23 +3167,31 @@ func testFQDNPolicy(t *testing.T) {
 	log.SetLevel(log.TraceLevel)
 	defer log.SetLevel(logLevel)
 	builder := &ClusterNetworkPolicySpecBuilder{}
-	builder = builder.SetName("test-acnp-drop-all-google").
+	builder = builder.SetName("test-acnp-reject-all-github").
 		SetTier("application").
 		SetPriority(1.0).
 		SetAppliedToGroup([]ACNPAppliedToSpec{{NSSelector: map[string]string{}}})
-	builder.AddFQDNRule("*google.com", ProtocolTCP, nil, nil, nil, "r1", nil, crdv1alpha1.RuleActionReject)
+	// The DNS server of e2e testbeds may reply large DNS response with a long list of AUTHORITY SECTION and ADDITIONAL
+	// SECTION, which causes the response to be truncated and the clients to retry over TCP. However, antrea-agent only
+	// inspects DNS UDP packets, the DNS resolution result will be missed by it if the clients uses DNS over TCP. And if
+	// the IP got from DNS/TCP response is different from the IP got from the first DNS/UDP response, the following
+	// application traffic will bypass FQDN NetworkPolicy.
+	// So we changed the target domain from google.com to github.com, which has a more stable DNS resolution result. The
+	// change could be reverted once we support inspecting DNS/TCP traffic.
+	// See https://github.com/antrea-io/antrea/issues/4130 for more details.
+	builder.AddFQDNRule("*github.com", ProtocolTCP, nil, nil, nil, "r1", nil, crdv1alpha1.RuleActionReject)
 	builder.AddFQDNRule("wayfair.com", ProtocolTCP, nil, nil, nil, "r2", nil, crdv1alpha1.RuleActionDrop)
 
 	testcases := []podToAddrTestStep{
 		{
 			Pod(namespaces["x"] + "/a"),
-			"drive.google.com",
+			"docs.github.com",
 			80,
 			Rejected,
 		},
 		{
 			Pod(namespaces["x"] + "/b"),
-			"maps.google.com",
+			"api.github.com",
 			80,
 			Rejected,
 		},
@@ -4395,6 +4406,75 @@ func TestAntreaPolicyStatusWithAppliedToPerRule(t *testing.T) {
 	})
 }
 
+func TestAntreaPolicyStatusWithAppliedToUnsupportedGroup(t *testing.T) {
+	skipIfHasWindowsNodes(t)
+	skipIfAntreaPolicyDisabled(t)
+
+	data, err := setupTest(t)
+	if err != nil {
+		t.Fatalf("Error when setting up test: %v", err)
+	}
+	defer teardownTest(t, data)
+
+	initialize(t, data)
+
+	testNamespace := namespaces["x"]
+	// Build a Group with namespaceSelector selecting namespaces outside testNamespace.
+	grpName := "grp-with-ns-selector"
+	grpBuilder := &GroupSpecBuilder{}
+	grpBuilder = grpBuilder.SetName(grpName).SetNamespace(testNamespace).
+		SetPodSelector(map[string]string{"pod": "b"}, nil).
+		SetNamespaceSelector(map[string]string{"ns": namespaces["y"]}, nil)
+	grp, err := k8sUtils.CreateOrUpdateV1Alpha3Group(grpBuilder.Get())
+	failOnError(err, t)
+	failOnError(waitForResourceReady(t, timeout, grp), t)
+	// Build a Group with the unsupported Group as child Group.
+	grpNestedName := "grp-nested"
+	grpBuilderNested := &GroupSpecBuilder{}
+	grpBuilderNested = grpBuilderNested.SetName(grpNestedName).SetNamespace(testNamespace).SetChildGroups([]string{grpName})
+	grp, err = k8sUtils.CreateOrUpdateV1Alpha3Group(grpBuilderNested.Get())
+	failOnError(err, t)
+	failOnError(waitForResourceReady(t, timeout, grp), t)
+
+	anpBuilder := &AntreaNetworkPolicySpecBuilder{}
+	anpBuilder = anpBuilder.SetName(testNamespace, "anp-applied-to-unsupported-group").
+		SetPriority(1.0).
+		SetAppliedToGroup([]ANPAppliedToSpec{{Group: grpName}})
+	anp, err := k8sUtils.CreateOrUpdateANP(anpBuilder.Get())
+	failOnError(err, t)
+	expectedStatus := crdv1alpha1.NetworkPolicyStatus{
+		Phase:                crdv1alpha1.NetworkPolicyPending,
+		ObservedGeneration:   1,
+		CurrentNodesRealized: 0,
+		DesiredNodesRealized: 0,
+		Conditions: []crdv1alpha1.NetworkPolicyCondition{
+			{
+				Type:               crdv1alpha1.NetworkPolicyConditionRealizable,
+				Status:             metav1.ConditionFalse,
+				LastTransitionTime: metav1.Now(),
+				Reason:             "NetworkPolicyAppliedToUnsupportedGroup",
+				Message:            fmt.Sprintf("Group %s/%s with Pods in other Namespaces can not be used as AppliedTo", testNamespace, grpName),
+			},
+		},
+	}
+	checkANPStatus(t, data, anp, expectedStatus)
+
+	anpBuilder2 := &AntreaNetworkPolicySpecBuilder{}
+	anpBuilder2 = anpBuilder2.SetName(testNamespace, "anp-applied-to-unsupported-child-group").
+		SetPriority(1.0).
+		SetAppliedToGroup([]ANPAppliedToSpec{{Group: grpNestedName}})
+	anp2, err := k8sUtils.CreateOrUpdateANP(anpBuilder2.Get())
+	failOnError(err, t)
+	expectedStatus.Conditions[0].Message = fmt.Sprintf("Group %s/%s with Pods in other Namespaces can not be used as AppliedTo", testNamespace, grpNestedName)
+	checkANPStatus(t, data, anp2, expectedStatus)
+
+	failOnError(k8sUtils.DeleteANP(anp.Namespace, anp.Name), t)
+	failOnError(k8sUtils.DeleteANP(anp2.Namespace, anp2.Name), t)
+	failOnError(k8sUtils.DeleteV1Alpha3Group(testNamespace, grpName), t)
+	failOnError(k8sUtils.DeleteV1Alpha3Group(testNamespace, grpNestedName), t)
+	k8sUtils.Cleanup(namespaces)
+}
+
 func checkANPStatus(t *testing.T, data *TestData, anp *crdv1alpha1.NetworkPolicy, expectedStatus crdv1alpha1.NetworkPolicyStatus) *crdv1alpha1.NetworkPolicy {
 	err := wait.Poll(100*time.Millisecond, policyRealizedTimeout, func() (bool, error) {
 		var err error
@@ -4421,7 +4501,7 @@ func checkACNPStatus(t *testing.T, data *TestData, acnp *crdv1alpha1.ClusterNetw
 	return acnp
 }
 
-// waitForANPRealized waits untils an ANP is realized and returns, or times out. A policy is
+// waitForANPRealized waits until an ANP is realized and returns, or times out. A policy is
 // considered realized when its Status has been updated so that the ObservedGeneration matches the
 // resource's Generation and the Phase is set to Realized.
 func (data *TestData) waitForANPRealized(t *testing.T, namespace string, name string, timeout time.Duration) error {
@@ -4438,7 +4518,7 @@ func (data *TestData) waitForANPRealized(t *testing.T, namespace string, name st
 	return nil
 }
 
-// waitForACNPRealized waits untils an ACNP is realized and returns, or times out. A policy is
+// waitForACNPRealized waits until an ACNP is realized and returns, or times out. A policy is
 // considered realized when its Status has been updated so that the ObservedGeneration matches the
 // resource's Generation and the Phase is set to Realized.
 func (data *TestData) waitForACNPRealized(t *testing.T, name string, timeout time.Duration) error {

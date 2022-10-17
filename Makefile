@@ -146,7 +146,7 @@ DOCKER_ENV := \
 		-v $(DOCKER_CACHE)/gopath:/tmp/gopath \
 		-v $(DOCKER_CACHE)/gocache:/tmp/gocache \
 		-v $(CURDIR):/usr/src/antrea.io/antrea \
-		golang:1.17
+		golang:$(GO_VERSION)
 
 .PHONY: docker-bin
 docker-bin: $(DOCKER_CACHE)
@@ -220,14 +220,17 @@ add-copyright:
 .linux-test-unit: .coverage
 	@echo
 	@echo "==> Running unit tests <=="
-	$(GO) test -race -coverprofile=.coverage/coverage-unit.txt -covermode=atomic -cover antrea.io/antrea/cmd/... antrea.io/antrea/pkg/... \
-	 antrea.io/antrea/multicluster/cmd/... antrea.io/antrea/multicluster/controllers/...
+	$(GO) test -race -coverpkg=antrea.io/antrea/cmd/...,antrea.io/antrea/pkg/...,antrea.io/antrea/multicluster/cmd/...,antrea.io/antrea/multicluster/controllers/... \
+	  -coverprofile=.coverage/coverage-unit.txt -covermode=atomic \
+	  antrea.io/antrea/cmd/... antrea.io/antrea/pkg/... antrea.io/antrea/multicluster/cmd/... antrea.io/antrea/multicluster/controllers/...
 
 .PHONY: .windows-test-unit
-.windows-test-unit:
+.windows-test-unit: .coverage
 	@echo
 	@echo "==> Running unit tests <=="
-	$(GO) test -race antrea.io/antrea/cmd/... antrea.io/antrea/pkg/...
+	$(GO) test -race -coverpkg=antrea.io/antrea/cmd/...,antrea.io/antrea/pkg/... \
+	  -coverprofile=.coverage/coverage-unit.txt -covermode=atomic \
+	  antrea.io/antrea/cmd/... antrea.io/antrea/pkg/...
 
 .PHONY: tidy
 tidy:
@@ -241,7 +244,7 @@ tidy:
 	@echo
 	@echo "==> Running integration tests <=="
 	@echo "SOME TESTS WILL FAIL IF NOT RUN AS ROOT!"
-	$(GO) test -v -coverpkg=antrea.io/antrea/pkg/... -coverprofile=.coverage/coverage-integration.txt -covermode=atomic -cover antrea.io/antrea/test/integration/...
+	$(GO) test -v -coverpkg=antrea.io/antrea/pkg/... -coverprofile=.coverage/coverage-integration.txt -covermode=atomic antrea.io/antrea/test/integration/...
 
 test-tidy:
 	@echo
@@ -258,7 +261,7 @@ fmt:
 
 .golangci-bin:
 	@echo "===> Installing Golangci-lint <==="
-	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $@ v1.41.1
+	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $@ v1.50.0
 
 .PHONY: golangci
 golangci: .golangci-bin
@@ -267,9 +270,9 @@ golangci: .golangci-bin
 	@echo "===> Running golangci (windows) <==="
 	@GOOS=windows $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml
 	@echo "===> Running golangci for Octant plugin (linux) <==="
-	@cd plugins/octant && GOOS=linux $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml
+	@cd plugins/octant && GOOS=linux CGO_ENABLED=0 $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml
 	@echo "===> Running golangci for Octant plugin (windows) <==="
-	@cd plugins/octant && GOOS=windows $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml
+	@cd plugins/octant && GOOS=windows CGO_ENABLED=0 $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml
 
 .PHONY: golangci-fix
 golangci-fix: .golangci-bin
@@ -278,9 +281,9 @@ golangci-fix: .golangci-bin
 	@echo "===> Running golangci (windows) <==="
 	@GOOS=windows $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml --fix
 	@echo "===> Running golangci for Octant plugin (linux) <==="
-	@cd plugins/octant && GOOS=linux $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml --fix
+	@cd plugins/octant && GOOS=linux CGO_ENABLED=0 $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml --fix
 	@echo "===> Running golangci for Octant plugin (windows) <==="
-	@cd plugins/octant && GOOS=windows $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml --fix
+	@cd plugins/octant && GOOS=windows CGO_ENABLED=0 $(CURDIR)/.golangci-bin/golangci-lint run -c $(CURDIR)/.golangci.yml --fix
 
 .PHONY: clean
 clean:
@@ -310,8 +313,6 @@ else
 	docker build --pull -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.ubuntu $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) antrea/antrea-ubuntu
-	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu
-	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION)
 
 # Build bins in a golang container, and build the antrea-ubuntu Docker image.
 .PHONY: build-ubuntu
@@ -323,8 +324,6 @@ else
 	docker build --pull -t antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.ubuntu $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) antrea/antrea-ubuntu
-	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu
-	docker tag antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubuntu:$(DOCKER_IMG_VERSION)
 
 # Build bins in a golang container, and build the antrea-ubi Docker image.
 .PHONY: build-ubi
@@ -336,8 +335,6 @@ else
 	docker build --pull -t antrea/antrea-ubi:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.ubi $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-ubi:$(DOCKER_IMG_VERSION) antrea/antrea-ubi
-	docker tag antrea/antrea-ubi:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubi
-	docker tag antrea/antrea-ubi:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-ubi:$(DOCKER_IMG_VERSION)
 
 .PHONY: build-windows
 build-windows:
@@ -349,8 +346,6 @@ else
 	docker build --pull -t antrea/antrea-windows:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.build.windows $(WIN_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-windows:$(DOCKER_IMG_VERSION) antrea/antrea-windows
-	docker tag antrea/antrea-windows:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-windows
-	docker tag antrea/antrea-windows:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-windows:$(DOCKER_IMG_VERSION)
 
 .PHONY: build-ubuntu-coverage
 build-ubuntu-coverage:
@@ -392,8 +387,6 @@ octant-antrea-ubuntu:
 	@echo "===> Building antrea/octant-antrea-ubuntu Docker image <==="
 	docker build --pull -t antrea/octant-antrea-ubuntu:$(DOCKER_IMG_VERSION) -f build/images/Dockerfile.octant.ubuntu $(DOCKER_BUILD_ARGS) .
 	docker tag antrea/octant-antrea-ubuntu:$(DOCKER_IMG_VERSION) antrea/octant-antrea-ubuntu
-	docker tag antrea/octant-antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/octant-antrea-ubuntu
-	docker tag antrea/octant-antrea-ubuntu:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/octant-antrea-ubuntu:$(DOCKER_IMG_VERSION)
 
 .PHONY: antrea-mc-controller
 antrea-mc-controller:
@@ -404,8 +397,6 @@ else
 	docker build --pull -t antrea/antrea-mc-controller:$(DOCKER_IMG_VERSION) -f multicluster/build/images/Dockerfile.build $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-mc-controller:$(DOCKER_IMG_VERSION) antrea/antrea-mc-controller
-	docker tag antrea/antrea-mc-controller:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-mc-controller
-	docker tag antrea/antrea-mc-controller:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-mc-controller:$(DOCKER_IMG_VERSION)
 
 .PHONY: antrea-mc-controller-coverage
 antrea-mc-controller-coverage:
@@ -416,7 +407,6 @@ else
 	docker build --pull -t antrea/antrea-mc-controller-coverage:$(DOCKER_IMG_VERSION) -f multicluster/build/images/Dockerfile.build.coverage $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/antrea-mc-controller-coverage:$(DOCKER_IMG_VERSION) antrea/antrea-mc-controller-coverage
-	docker tag antrea/antrea-mc-controller-coverage:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/antrea-mc-controller-coverage
 
 .PHONY: flow-aggregator-image
 flow-aggregator-image:
@@ -427,8 +417,6 @@ else
 	docker build --pull -t antrea/flow-aggregator:$(DOCKER_IMG_VERSION) -f build/images/flow-aggregator/Dockerfile $(DOCKER_BUILD_ARGS) .
 endif
 	docker tag antrea/flow-aggregator:$(DOCKER_IMG_VERSION) antrea/flow-aggregator
-	docker tag antrea/flow-aggregator:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/flow-aggregator
-	docker tag antrea/flow-aggregator:$(DOCKER_IMG_VERSION) projects.registry.vmware.com/antrea/flow-aggregator:$(DOCKER_IMG_VERSION)
 
 .PHONY: flow-aggregator-ubuntu-coverage
 flow-aggregator-ubuntu-coverage:

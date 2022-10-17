@@ -243,7 +243,7 @@ function run_codecov { (set -e
     shasum -a 256 -c codecov.SHA256SUM
 
     chmod +x codecov
-    ./codecov -c -t ${CODECOV_TOKEN} -F ${flag} -f ${file} -s ${dir} -C ${GIT_COMMIT} -r antrea-io/antrea
+    #./codecov -c -t ${CODECOV_TOKEN} -F ${flag} -f ${file} -s ${dir} -C ${GIT_COMMIT} -r antrea-io/antrea
 
     rm -f trustedkeys.gpg codecov
 )}
@@ -265,12 +265,12 @@ function deliver_antrea_multicluster {
 
     DOCKER_REGISTRY="${DOCKER_REGISTRY}" ./hack/build-antrea-linux-all.sh --pull
     echo "====== Delivering Antrea to all the Nodes ======"
-    docker save -o ${WORKDIR}/antrea-ubuntu.tar ${DOCKER_REGISTRY}/antrea/antrea-ubuntu:latest
+    docker save -o ${WORKDIR}/antrea-ubuntu.tar antrea/antrea-ubuntu:latest
 
 
     if [[ ${KIND} == "true" ]]; then
         for name in ${CLUSTER_NAMES[*]}; do
-            kind load docker-image ${DOCKER_REGISTRY}/antrea/antrea-ubuntu:latest --name ${name}
+            kind load docker-image antrea/antrea-ubuntu:latest --name ${name}
         done
     else
         for kubeconfig in "${multicluster_kubeconfigs[@]}"
@@ -294,10 +294,10 @@ function deliver_multicluster_controller {
     export GOROOT=/usr/local/go
     export PATH=${GOROOT}/bin:$PATH
 
-    DEFAULT_IMAGE="${DOCKER_REGISTRY}"/antrea/antrea-mc-controller:latest
+    DEFAULT_IMAGE=antrea/antrea-mc-controller:latest
     if $COVERAGE;then
         export NO_PULL=1;make antrea-mc-controller-coverage
-        DEFAULT_IMAGE="${DOCKER_REGISTRY}"/antrea/antrea-mc-controller-coverage:latest
+        DEFAULT_IMAGE=antrea/antrea-mc-controller-coverage:latest
         docker save "${DEFAULT_IMAGE}" -o "${WORKDIR}"/antrea-mcs.tar
         ./multicluster/hack/generate-manifest.sh -l antrea-multicluster -c > ./multicluster/test/yamls/leader-manifest.yml
         ./multicluster/hack/generate-manifest.sh -m -c > ./multicluster/test/yamls/member-manifest.yml
@@ -417,11 +417,10 @@ EOF
 
     set -x
     go test -v antrea.io/antrea/multicluster/test/e2e --logs-export-dir `pwd`/antrea-multicluster-test-logs $options
-    set +x
-
     if [[ "$?" != "0" ]]; then
         TEST_FAILURE=true
     fi
+    set +x
     set -e
 }
 

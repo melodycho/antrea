@@ -38,14 +38,13 @@ type egressGroupEvent struct {
 	ResourceVersion uint64
 }
 
-/// ToWatchEvent converts the egressGroupEvent to *watch.Event based on the provided Selectors. It has the following features:
+// ToWatchEvent converts the egressGroupEvent to *watch.Event based on the provided Selectors. It has the following features:
 // 1. Added event will be generated if the Selectors was not interested in the object but is now.
 // 2. Modified event will be generated if the Selectors was and is interested in the object.
 // 3. Deleted event will be generated if the Selectors was interested in the object but is not now.
 // 4. If nodeName is specified, only GroupMembers that hosted by the Node will be in the event.
 func (event *egressGroupEvent) ToWatchEvent(selectors *storage.Selectors, isInitEvent bool) *watch.Event {
 	prevObjSelected, currObjSelected := isSelected(event.Key, event.PrevGroup, event.CurrGroup, selectors, isInitEvent)
-
 	// If nodeName is specified in selectors, only GroupMembers that hosted by the Node should be in the event.
 	nodeName, nodeSpecified := selectors.Field.RequiresExactMatch("nodeName")
 
@@ -169,7 +168,7 @@ func NewEgressGroupStore() storage.Interface {
 	return ram.NewStore(EgressGroupKeyFunc, nil, genEgressGroupEvent, keyAndSpanSelectFunc, func() runtime.Object { return new(controlplane.EgressGroup) })
 }
 
-// keyAndSpanSelectFunc returns whether the provided selectors matches the key and/or the nodeNames.
+// keyAndSpanSelectFunc returns whether the provided selectors match the key and/or the nodeNames.
 func keyAndSpanSelectFunc(selectors *storage.Selectors, key string, obj interface{}) bool {
 	// If Key is present in selectors, the provided key must match it.
 	if selectors.Key != "" && key != selectors.Key {

@@ -475,14 +475,15 @@ func persistRoundNum(num uint64, bridgeClient ovsconfig.OVSBridgeClient, interva
 
 // initOpenFlowPipeline sets up necessary Openflow entries, including pipeline, classifiers, conn_track, and gateway flows
 // Every time the agent is (re)started, we go through the following sequence:
-//   1. agent determines the new round number (this is done by incrementing the round number
-//   persisted in OVSDB, or if it's not available by picking round 1).
-//   2. any existing flow for which the round number matches the round number obtained from step 1
-//   is deleted.
-//   3. all required flows are installed, using the round number obtained from step 1.
-//   4. after convergence, all existing flows for which the round number matches the previous round
-//   number (i.e. the round number which was persisted in OVSDB, if any) are deleted.
-//   5. the new round number obtained from step 1 is persisted to OVSDB.
+//  1. agent determines the new round number (this is done by incrementing the round number
+//     persisted in OVSDB, or if it's not available by picking round 1).
+//  2. any existing flow for which the round number matches the round number obtained from step 1
+//     is deleted.
+//  3. all required flows are installed, using the round number obtained from step 1.
+//  4. after convergence, all existing flows for which the round number matches the previous round
+//     number (i.e. the round number which was persisted in OVSDB, if any) are deleted.
+//  5. the new round number obtained from step 1 is persisted to OVSDB.
+//
 // The rationale for not persisting the new round number until after all previous flows have been
 // deleted is to avoid a situation in which some stale flows are never deleted because of successive
 // agent restarts (with the agent crashing before step 4 can be completed). With the sequence
@@ -539,11 +540,6 @@ func (i *Initializer) initOpenFlowPipeline() error {
 			klog.Info("Replaying OF flows to OVS bridge")
 			i.ofClient.ReplayFlows()
 			klog.Info("Flow replay completed")
-
-			if i.ovsBridgeClient.GetOVSDatapathType() == ovsconfig.OVSDatapathNetdev {
-				// we don't set flow-restore-wait when using the OVS netdev datapath
-				return
-			}
 
 			// ofClient and ovsBridgeClient have their own mechanisms to restore connections with OVS, and it could
 			// happen that ovsBridgeClient's connection is not ready when ofClient completes flow replay. We retry it
@@ -751,8 +747,10 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 	}
 
 	// Enabling UDP checksum can greatly improve the performance for Geneve and
-	// VXLAN tunnels by triggering GRO on the receiver.
-	shouldEnableCsum := i.networkConfig.TunnelType == ovsconfig.GeneveTunnel || i.networkConfig.TunnelType == ovsconfig.VXLANTunnel
+	// VXLAN tunnels by triggering GRO on the receiver for old Linux kernel versions.
+	// It's not necessary for new Linux kernel versions with the following patch:
+	// https://github.com/torvalds/linux/commit/89e5c58fc1e2857ccdaae506fb8bc5fed57ee063.
+	shouldEnableCsum := i.networkConfig.TunnelCsum && (i.networkConfig.TunnelType == ovsconfig.GeneveTunnel || i.networkConfig.TunnelType == ovsconfig.VXLANTunnel)
 
 	// Check the default tunnel port.
 	if portExists {
@@ -761,12 +759,12 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 			tunnelIface.TunnelInterfaceConfig.DestinationPort == i.networkConfig.TunnelPort &&
 			tunnelIface.TunnelInterfaceConfig.LocalIP.Equal(localIP) {
 			klog.V(2).Infof("Tunnel port %s already exists on OVS bridge", tunnelPortName)
-			// This could happen when upgrading from previous versions that didn't set it.
-			if shouldEnableCsum && !tunnelIface.TunnelInterfaceConfig.Csum {
-				if err := i.enableTunnelCsum(tunnelPortName); err != nil {
-					return fmt.Errorf("failed to enable csum for tunnel port %s: %v", tunnelPortName, err)
+			if shouldEnableCsum != tunnelIface.TunnelInterfaceConfig.Csum {
+				klog.InfoS("Updating csum for tunnel port", "port", tunnelPortName, "csum", shouldEnableCsum)
+				if err := i.setTunnelCsum(tunnelPortName, shouldEnableCsum); err != nil {
+					return fmt.Errorf("failed to update csum for tunnel port %s to %v: %v", tunnelPortName, shouldEnableCsum, err)
 				}
-				tunnelIface.TunnelInterfaceConfig.Csum = true
+				tunnelIface.TunnelInterfaceConfig.Csum = shouldEnableCsum
 			}
 			i.nodeConfig.TunnelOFPort = uint32(tunnelIface.OFPort)
 			return nil
@@ -810,15 +808,15 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 			return err
 		}
 		klog.InfoS("Allocated OpenFlow port for tunnel interface", "port", tunnelPortName, "ofPort", tunPort)
-		tunnelIface = interfacestore.NewTunnelInterface(tunnelPortName, i.networkConfig.TunnelType, i.networkConfig.TunnelPort, localIP, shouldEnableCsum)
-		tunnelIface.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: tunnelPortUUID, OFPort: tunPort}
+		ovsPortConfig := &interfacestore.OVSPortConfig{PortUUID: tunnelPortUUID, OFPort: tunPort}
+		tunnelIface = interfacestore.NewTunnelInterface(tunnelPortName, i.networkConfig.TunnelType, i.networkConfig.TunnelPort, localIP, shouldEnableCsum, ovsPortConfig)
 		i.ifaceStore.AddInterface(tunnelIface)
 		i.nodeConfig.TunnelOFPort = uint32(tunPort)
 	}
 	return nil
 }
 
-func (i *Initializer) enableTunnelCsum(tunnelPortName string) error {
+func (i *Initializer) setTunnelCsum(tunnelPortName string, enable bool) error {
 	options, err := i.ovsBridgeClient.GetInterfaceOptions(tunnelPortName)
 	if err != nil {
 		return fmt.Errorf("error getting interface options: %w", err)
@@ -828,7 +826,7 @@ func (i *Initializer) enableTunnelCsum(tunnelPortName string) error {
 	for k, v := range options {
 		updatedOptions[k] = v
 	}
-	updatedOptions["csum"] = "true"
+	updatedOptions["csum"] = strconv.FormatBool(enable)
 	return i.ovsBridgeClient.SetInterfaceOptions(tunnelPortName, updatedOptions)
 }
 
