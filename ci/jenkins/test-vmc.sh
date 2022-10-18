@@ -326,12 +326,6 @@ function run_codecov { (set -e
 
     chmod +x codecov
 
-    if [[ $remote == true ]]; then
-        ${SCP_WITH_UTILS_KEY} codecov jenkins@${ip}:~
-        ${SSH_WITH_UTILS_KEY} -n jenkins@${ip} "cd antrea; ~/codecov -c -t ${CODECOV_TOKEN} -F ${flag} -f ${file} -C ${GIT_COMMIT} -r antrea-io/antrea"
-    else
-        ./codecov -c -t ${CODECOV_TOKEN} -F ${flag} -f ${file} -s ${dir} -C ${GIT_COMMIT} -r antrea-io/antrea
-    fi
     rm -f trustedkeys.gpg codecov
 )}
 
@@ -420,8 +414,8 @@ function deliver_antrea {
         docker save -o antrea-ubuntu-coverage.tar antrea/antrea-ubuntu-coverage:${DOCKER_IMG_VERSION}
         docker save -o flow-aggregator-coverage.tar antrea/flow-aggregator-coverage:${DOCKER_IMG_VERSION}
     else
-        docker save -o antrea-ubuntu.tar projects.registry.vmware.com/antrea/antrea-ubuntu:${DOCKER_IMG_VERSION}
-        docker save -o flow-aggregator.tar projects.registry.vmware.com/antrea/flow-aggregator:${DOCKER_IMG_VERSION}
+        docker save -o antrea-ubuntu.tar antrea/antrea-ubuntu:${DOCKER_IMG_VERSION}
+        docker save -o flow-aggregator.tar antrea/flow-aggregator:${DOCKER_IMG_VERSION}
     fi
 
     control_plane_ip="$(kubectl get nodes -o wide --no-headers=true | awk -v role="$CONTROL_PLANE_NODE_ROLE" '$3 ~ role {print $6}')"
@@ -435,8 +429,8 @@ function deliver_antrea {
             copy_image antrea-ubuntu-coverage.tar docker.io/antrea/antrea-ubuntu-coverage ${IPs[$i]} ${DOCKER_IMG_VERSION} true
             copy_image flow-aggregator-coverage.tar docker.io/antrea/flow-aggregator-coverage ${IPs[$i]} ${DOCKER_IMG_VERSION} true
         else
-            copy_image antrea-ubuntu.tar projects.registry.vmware.com/antrea/antrea-ubuntu ${IPs[$i]} ${DOCKER_IMG_VERSION} true
-            copy_image flow-aggregator.tar projects.registry.vmware.com/antrea/flow-aggregator ${IPs[$i]} ${DOCKER_IMG_VERSION} true
+            copy_image antrea-ubuntu.tar docker.io/antrea/antrea-ubuntu ${IPs[$i]} ${DOCKER_IMG_VERSION} true
+            copy_image flow-aggregator.tar docker.io/antrea/flow-aggregator ${IPs[$i]} ${DOCKER_IMG_VERSION} true
         fi
     done
 
@@ -449,11 +443,10 @@ function deliver_antrea {
         docker pull ${DOCKER_REGISTRY}/antrea/antrea-ubuntu:$OLD_ANTREA_VERSION
     else
         docker pull antrea/antrea-ubuntu:$OLD_ANTREA_VERSION
-        docker tag antrea/antrea-ubuntu:$OLD_ANTREA_VERSION projects.registry.vmware.com/antrea/antrea-ubuntu:$OLD_ANTREA_VERSION
     fi
 
     echo "====== Delivering old Antrea images to all the Nodes ======"
-    docker save -o antrea-ubuntu-old.tar projects.registry.vmware.com/antrea/antrea-ubuntu:$OLD_ANTREA_VERSION
+    docker save -o antrea-ubuntu-old.tar antrea/antrea-ubuntu:$OLD_ANTREA_VERSION
     node_num=$(kubectl get nodes --no-headers=true | wc -l)
     antrea_image="antrea-ubuntu"
     for i in "${!IPs[@]}"
@@ -461,7 +454,7 @@ function deliver_antrea {
         # We want old-versioned Antrea agents to be more than half in cluster
         if [[ $i -ge $((${node_num}/2)) ]]; then
             # Tag old image to latest if we want Antrea agent to be old-versioned
-            copy_image antrea-ubuntu-old.tar projects.registry.vmware.com/antrea/antrea-ubuntu ${IPs[$i]} $OLD_ANTREA_VERSION false
+            copy_image antrea-ubuntu-old.tar docker.io/antrea/antrea-ubuntu ${IPs[$i]} $OLD_ANTREA_VERSION false
         fi
     done
 }
@@ -564,7 +557,7 @@ function run_conformance {
     ${SCP_WITH_ANTREA_CI_KEY} $GIT_CHECKOUT_DIR/jenkins/out/kubeconfig capv@${control_plane_ip}:~/.kube/config
 
     if [[ "$TESTCASE" == "conformance" ]]; then
-        ${GIT_CHECKOUT_DIR}/ci/run-k8s-e2e-tests.sh --e2e-conformance --log-mode ${MODE} --kubeconfig ${GIT_CHECKOUT_DIR}/jenkins/out/kubeconfig > ${GIT_CHECKOUT_DIR}/vmc-test.log
+        ${GIT_CHECKOUT_DIR}/ci/run-k8s-e2e-tests.sh --e2e-conformance --e2e-sig-network --log-mode ${MODE} --kubeconfig ${GIT_CHECKOUT_DIR}/jenkins/out/kubeconfig > ${GIT_CHECKOUT_DIR}/vmc-test.log
     elif [[ "$TESTCASE" == "all-features-conformance" ]]; then
         ${GIT_CHECKOUT_DIR}/ci/run-k8s-e2e-tests.sh --e2e-conformance --log-mode ${MODE} --kubeconfig ${GIT_CHECKOUT_DIR}/jenkins/out/kubeconfig > ${GIT_CHECKOUT_DIR}/vmc-test.log
     elif [[ "$TESTCASE" == "whole-conformance" ]]; then

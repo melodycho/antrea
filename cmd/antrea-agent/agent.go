@@ -170,6 +170,7 @@ func run(o *Options) error {
 	networkConfig := &config.NetworkConfig{
 		TunnelType:            ovsconfig.TunnelType(o.config.TunnelType),
 		TunnelPort:            o.config.TunnelPort,
+		TunnelCsum:            o.config.TunnelCsum,
 		TrafficEncapMode:      encapMode,
 		TrafficEncryptionMode: encryptionMode,
 		TransportIface:        o.config.TransportInterface,
@@ -406,7 +407,7 @@ func run(o *Options) error {
 			return fmt.Errorf("invalid Node Transport IPAddr in Node config: %v", nodeConfig)
 		}
 		memberlistCluster, err = memberlist.NewCluster(nodeTransportIP, o.config.ClusterMembershipPort,
-			nodeConfig.Name, nodeInformer, externalIPPoolInformer,
+			nodeConfig.Name, nodeInformer, externalIPPoolInformer, nil,
 		)
 		if err != nil {
 			return fmt.Errorf("error creating new memberlist cluster: %v", err)
@@ -635,7 +636,8 @@ func run(o *Options) error {
 			localPodInformer,
 			nodeConfig.Name,
 			cniPodInfoStore,
-			cniServer)
+			// safe to call given that cniServer.Initialize has been called already.
+			cniServer.GetPodConfigurator())
 		go podWatchController.Run(stopCh)
 	}
 

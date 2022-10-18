@@ -74,7 +74,7 @@ Kubernetes: `>= 1.16.0-0`
 | flowCollector.flowPollInterval | string | `"5s"` | Determines how often the flow exporter polls for new connections. |
 | flowCollector.idleFlowExportTimeout | string | `"15s"` | timeout after which a flow record is sent to the collector for idle flows. |
 | hostGateway | string | `"antrea-gw0"` | Name of the interface antrea-agent will create and use for host <-> Pod communication. |
-| image | object | `{"pullPolicy":"IfNotPresent","repository":"projects.registry.vmware.com/antrea/antrea-ubuntu","tag":""}` | Container image to use for Antrea components. |
+| image | object | `{"pullPolicy":"IfNotPresent","repository":"antrea/antrea-ubuntu","tag":""}` | Container image to use for Antrea components. |
 | ipsec.authenticationMode | string | `"psk"` | The authentication mode to use for IPsec. Must be one of "psk" or "cert". |
 | ipsec.csrSigner | object | `{"autoApprove":true,"selfSignedCA":true}` | CSR signer configuration when the authenticationMode is "cert". |
 | ipsec.csrSigner.autoApprove | bool | `true` | - Enable auto approval of Antrea signer for IPsec certificates. |
@@ -107,6 +107,7 @@ Kubernetes: `>= 1.16.0-0`
 | trafficEncryptionMode | string | `"none"` | Determines how tunnel traffic is encrypted. Currently encryption only works with encap mode.It must be one of "none", "ipsec", "wireGuard". |
 | transportInterface | string | `""` | Name of the interface on Node which is used for tunneling or routing the traffic across Nodes. |
 | transportInterfaceCIDRs | list | `[]` | Network CIDRs of the interface on Node which is used for tunneling or routing the traffic across Nodes. |
+| tunnelCsum | bool | `false` | TunnelCsum determines whether to compute UDP encapsulation header (Geneve or VXLAN) checksums on outgoing packets. For Linux kernel before Mar 2021, UDP checksum must be present to trigger GRO on the receiver for better performance of Geneve and VXLAN tunnels. The issue has been fixed by https://github.com/torvalds/linux/commit/89e5c58fc1e2857ccdaae506fb8bc5fed57ee063, thus computing UDP checksum is no longer necessary. It should only be set to true when you are using an unpatched Linux kernel and observing poor transfer performance. |
 | tunnelPort | int | `0` | TunnelPort is the destination port for UDP and TCP based tunnel protocols (Geneve, VXLAN, and STT). If zero, it will use the assigned IANA port for the protocol, i.e. 6081 for Geneve, 4789 for VXLAN, and 7471 for STT. |
 | tunnelType | string | `"geneve"` | Tunnel protocol used for encapsulating traffic across Nodes. It must be one of "geneve", "vxlan", "gre", "stt". |
 | webhooks.labelsMutator.enable | bool | `false` |  |

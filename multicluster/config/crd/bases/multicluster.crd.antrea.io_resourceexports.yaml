@@ -59,7 +59,7 @@ spec:
                 description: ClusterID specifies the member cluster this resource
                   exported from.
                 type: string
-              clusterinfo:
+              clusterInfo:
                 description: If exported resource is ClusterInfo.
                 properties:
                   clusterID:
@@ -74,11 +74,16 @@ spec:
                           type: string
                       type: object
                     type: array
+                  podCIDRs:
+                    description: PodCIDRs is the Pod IP address CIDRs.
+                    items:
+                      type: string
+                    type: array
                   serviceCIDR:
                     description: ServiceCIDR is the IP ranges used by Service ClusterIP.
                     type: string
                 type: object
-              clusternetworkpolicy:
+              clusterNetworkPolicy:
                 description: If exported resource is AntreaClusterNetworkPolicy.
                 properties:
                   appliedTo:
@@ -2460,10 +2465,10 @@ spec:
                       type: object
                     type: array
                 type: object
-              externalentity:
+              externalEntity:
                 description: If exported resource is ExternalEntity.
                 properties:
-                  externalentityspec:
+                  externalEntitySpec:
                     description: ExternalEntitySpec defines the desired state for
                       ExternalEntity.
                     properties:
@@ -2514,6 +2519,12 @@ spec:
               kind:
                 description: Kind of exported resource.
                 type: string
+              labelIdentity:
+                description: If exported resource is LabelIdentity of a cluster.
+                properties:
+                  normalizedLabel:
+                    type: string
+                type: object
               name:
                 description: Name of exported resource.
                 type: string
