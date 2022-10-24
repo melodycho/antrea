@@ -36,7 +36,11 @@ type EndpointsExport struct {
 
 // ExternalEntityExport exports ExternalEntity.
 type ExternalEntityExport struct {
-	ExternalEntitySpec v1alpha2.ExternalEntitySpec `json:"externalentityspec,omitempty"`
+	ExternalEntitySpec v1alpha2.ExternalEntitySpec `json:"externalEntitySpec,omitempty"`
+}
+
+type LabelIdentityExport struct {
+	NormalizedLabel string `json:"normalizedLabel,omitempty"`
 }
 
 // RawResourceExport exports opaque resources.
@@ -60,11 +64,13 @@ type ResourceExportSpec struct {
 	// If exported resource is Endpoints.
 	Endpoints *EndpointsExport `json:"endpoints,omitempty"`
 	// If exported resource is ClusterInfo.
-	ClusterInfo *ClusterInfo `json:"clusterinfo,omitempty"`
+	ClusterInfo *ClusterInfo `json:"clusterInfo,omitempty"`
 	// If exported resource is ExternalEntity.
-	ExternalEntity *ExternalEntityExport `json:"externalentity,omitempty"`
+	ExternalEntity *ExternalEntityExport `json:"externalEntity,omitempty"`
 	// If exported resource is AntreaClusterNetworkPolicy.
-	ClusterNetworkPolicy *v1alpha1.ClusterNetworkPolicySpec `json:"clusternetworkpolicy,omitempty"`
+	ClusterNetworkPolicy *v1alpha1.ClusterNetworkPolicySpec `json:"clusterNetworkPolicy,omitempty"`
+	// If exported resource is LabelIdentity of a cluster.
+	LabelIdentity *LabelIdentityExport `json:"labelIdentity,omitempty"`
 	// If exported resource kind is unknown.
 	Raw *RawResourceExport `json:"raw,omitempty"`
 }
@@ -102,8 +108,8 @@ type ResourceExportStatus struct {
 }
 
 // +genclient
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 
 // +kubebuilder:printcolumn:name="Cluster ID",type=string,JSONPath=`.spec.clusterID`,description="Cluster ID of the exporting cluster"
 // +kubebuilder:printcolumn:name="Kind",type=string,JSONPath=`.spec.kind`,description="Kind of the exported resource"
@@ -119,7 +125,7 @@ type ResourceExport struct {
 	Status ResourceExportStatus `json:"status,omitempty"`
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ResourceExportList contains a list of ResourceExport.
 type ResourceExportList struct {

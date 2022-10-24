@@ -111,6 +111,11 @@ spec:
                       type: string
                   type: object
                 type: array
+              podCIDRs:
+                description: PodCIDRs is the Pod IP address CIDRs.
+                items:
+                  type: string
+                type: array
               serviceCIDR:
                 description: ServiceCIDR is the IP ranges used by Service ClusterIP.
                 type: string
@@ -398,6 +403,60 @@ spec:
     storage: true
     subresources:
       status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.9.0
+  creationTimestamp: null
+  labels:
+    app: antrea
+  name: labelidentities.multicluster.crd.antrea.io
+spec:
+  group: multicluster.crd.antrea.io
+  names:
+    kind: LabelIdentity
+    listKind: LabelIdentityList
+    plural: labelidentities
+    singular: labelidentity
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: LabelIdentity is an imported label identity from the ClusterSet.
+          For each unique label identity, a LabelIdentity will be created in the member
+          cluster.
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              id:
+                description: ID is the ID allocated for the label identity by the
+                  leader cluster.
+                format: int32
+                type: integer
+              label:
+                description: Label is the normalized string of a label identity. The
+                  format of normalized label identity is `ns:(?P<nslabels>(.)*)&pod:(?P<podlabels>(.)*)`
+                  E.g., `ns:kubernetes.io/metadata.name=kube-system&pod:app=db`
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -743,6 +802,22 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - services
   verbs:
   - create
@@ -893,6 +968,18 @@ rules:
 - apiGroups:
   - multicluster.crd.antrea.io
   resources:
+  - labelidentities
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - multicluster.crd.antrea.io
+  resources:
   - gateways
   verbs:
   - create
@@ -946,12 +1033,15 @@ data:
     leaderElection:
       leaderElect: false
     serviceCIDR: ""
+    podCIDRs:
+      - ""
     gatewayIPPrecedence: "private"
+    endpointIPType: "ClusterIP"
 kind: ConfigMap
 metadata:
   labels:
     app: antrea
-  name: antrea-mc-controller-config-6b7ccgh6k9
+  name: antrea-mc-controller-config
   namespace: kube-system
 ---
 apiVersion: v1
@@ -985,6 +1075,8 @@ spec:
       component: antrea-mc-controller
   template:
     metadata:
+      annotations:
+        checksum/config: ab74dc9fd6d27a934c61d50e51dbf331ef6d57ab28c1121df3520bef6aad1f79
       labels:
         app: antrea
         component: antrea-mc-controller
@@ -1000,7 +1092,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: projects.registry.vmware.com/antrea/antrea-mc-controller:latest
+        image: antrea/antrea-mc-controller:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -1033,7 +1125,7 @@ spec:
       terminationGracePeriodSeconds: 10
       volumes:
       - configMap:
-          name: antrea-mc-controller-config-6b7ccgh6k9
+          name: antrea-mc-controller-config
         name: antrea-mc-controller-config
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -1099,4 +1191,25 @@ webhooks:
     - UPDATE
     resources:
     - clustersets
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      name: antrea-mc-webhook-service
+      namespace: kube-system
+      path: /validate-multicluster-crd-antrea-io-v1alpha1-gateway
+  failurePolicy: Fail
+  name: vgateway.kb.io
+  rules:
+  - apiGroups:
+    - multicluster.crd.antrea.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - gateways
   sideEffects: None

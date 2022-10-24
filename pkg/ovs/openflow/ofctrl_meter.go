@@ -51,7 +51,7 @@ func (m *ofMeter) KeyString() string {
 	return fmt.Sprintf("meter_id:%d", m.ofctrl.ID)
 }
 
-func (m *ofMeter) GetBundleMessage(entryOper OFOperation) (ofctrl.OpenFlowModMessage, error) {
+func (m *ofMeter) GetBundleMessages(entryOper OFOperation) ([]ofctrl.OpenFlowModMessage, error) {
 	var operation int
 	switch entryOper {
 	case AddMessage:
@@ -62,7 +62,7 @@ func (m *ofMeter) GetBundleMessage(entryOper OFOperation) (ofctrl.OpenFlowModMes
 		operation = openflow15.MC_DELETE
 	}
 	message := m.ofctrl.GetBundleMessage(operation)
-	return message, nil
+	return []ofctrl.OpenFlowModMessage{message}, nil
 }
 
 func (m *ofMeter) ResetMeterBands() Meter {
@@ -127,6 +127,7 @@ func (m *meterBandBuilder) Done() Meter {
 		mbExp := new(openflow15.MeterBandExperimenter)
 		mbExp.MeterBandHeader = *m.meterBandHeader
 		mbExp.Experimenter = m.experimenter
+		mb = mbExp
 	}
 	m.meter.ofctrl.AddMeterBand(&mb)
 	return m.meter

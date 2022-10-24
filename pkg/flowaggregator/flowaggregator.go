@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -93,8 +93,11 @@ var (
 	newIPFIXExporter = func(k8sClient kubernetes.Interface, opt *options.Options, registry ipfix.IPFIXRegistry) exporter.Interface {
 		return exporter.NewIPFIXExporter(k8sClient, opt, registry)
 	}
-	newClickHouseExporter = func(opt *options.Options) (exporter.Interface, error) {
-		return exporter.NewClickHouseExporter(opt)
+	newClickHouseExporter = func(k8sClient kubernetes.Interface, opt *options.Options) (exporter.Interface, error) {
+		return exporter.NewClickHouseExporter(k8sClient, opt)
+	}
+	newS3Exporter = func(k8sClient kubernetes.Interface, opt *options.Options) (exporter.Interface, error) {
+		return exporter.NewS3Exporter(k8sClient, opt)
 	}
 )
 
@@ -118,6 +121,7 @@ type flowAggregator struct {
 	APIServer                   flowaggregatorconfig.APIServerConfig
 	ipfixExporter               exporter.Interface
 	clickHouseExporter          exporter.Interface
+	s3Exporter                  exporter.Interface
 	logTickerDuration           time.Duration
 }
 
@@ -144,7 +148,7 @@ func NewFlowAggregator(
 		return nil, fmt.Errorf("error when starting file watch on configuration dir: %v", err)
 	}
 
-	data, err := ioutil.ReadFile(configFile)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read FlowAggregator configuration file: %v", err)
 	}
@@ -179,9 +183,16 @@ func NewFlowAggregator(
 	}
 	if opt.Config.ClickHouse.Enable {
 		var err error
-		fa.clickHouseExporter, err = newClickHouseExporter(opt)
+		fa.clickHouseExporter, err = newClickHouseExporter(k8sClient, opt)
 		if err != nil {
 			return nil, fmt.Errorf("error when creating ClickHouse export process: %v", err)
+		}
+	}
+	if opt.Config.S3Uploader.Enable {
+		var err error
+		fa.s3Exporter, err = newS3Exporter(k8sClient, opt)
+		if err != nil {
+			return nil, fmt.Errorf("error when creating S3 export process: %v", err)
 		}
 	}
 	if opt.Config.FlowCollector.Enable {
@@ -285,6 +296,9 @@ func (fa *flowAggregator) Run(stopCh <-chan struct{}) {
 	if fa.clickHouseExporter != nil {
 		fa.clickHouseExporter.Start()
 	}
+	if fa.s3Exporter != nil {
+		fa.s3Exporter.Start()
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -316,6 +330,9 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 		}
 		if fa.clickHouseExporter != nil {
 			fa.clickHouseExporter.Stop()
+		}
+		if fa.s3Exporter != nil {
+			fa.s3Exporter.Stop()
 		}
 	}()
 	updateCh := fa.updateCh
@@ -370,6 +387,11 @@ func (fa *flowAggregator) sendFlowKeyRecord(key ipfixintermediate.FlowKey, recor
 	}
 	if fa.clickHouseExporter != nil {
 		if err := fa.clickHouseExporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
+			return err
+		}
+	}
+	if fa.s3Exporter != nil {
+		if err := fa.s3Exporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
 			return err
 		}
 	}
@@ -522,7 +544,7 @@ func (fa *flowAggregator) watchConfiguration(stopCh <-chan struct{}) {
 }
 
 func (fa *flowAggregator) handleWatcherEvent() error {
-	data, err := ioutil.ReadFile(fa.configFile)
+	data, err := os.ReadFile(fa.configFile)
 	if err != nil {
 		return fmt.Errorf("cannot read FlowAggregator configuration file: %v", err)
 	}
@@ -564,7 +586,7 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 		if fa.clickHouseExporter == nil {
 			klog.InfoS("Enabling ClickHouse")
 			var err error
-			fa.clickHouseExporter, err = newClickHouseExporter(opt)
+			fa.clickHouseExporter, err = newClickHouseExporter(fa.k8sClient, opt)
 			if err != nil {
 				klog.ErrorS(err, "Error when creating ClickHouse export process")
 				return
@@ -580,6 +602,28 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 			fa.clickHouseExporter.Stop()
 			fa.clickHouseExporter = nil
 			klog.InfoS("Disabled ClickHouse")
+		}
+	}
+	if opt.Config.S3Uploader.Enable {
+		if fa.s3Exporter == nil {
+			klog.InfoS("Enabling S3Uploader")
+			var err error
+			fa.s3Exporter, err = newS3Exporter(fa.k8sClient, opt)
+			if err != nil {
+				klog.ErrorS(err, "Error when creating S3 export process")
+				return
+			}
+			fa.s3Exporter.Start()
+			klog.InfoS("Enabled S3Uploader")
+		} else {
+			fa.s3Exporter.UpdateOptions(opt)
+		}
+	} else {
+		if fa.s3Exporter != nil {
+			klog.InfoS("Disabling S3Uploader")
+			fa.s3Exporter.Stop()
+			fa.s3Exporter = nil
+			klog.InfoS("Disabled S3Uploader")
 		}
 	}
 }

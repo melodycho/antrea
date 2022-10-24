@@ -44,6 +44,7 @@ type featureService struct {
 	networkConfig          *config.NetworkConfig
 	gatewayPort            uint32
 
+	enableAntreaPolicy    bool
 	enableProxy           bool
 	proxyAll              bool
 	connectUplinkToBridge bool
@@ -63,6 +64,7 @@ func newFeatureService(
 	networkConfig *config.NetworkConfig,
 	serviceConfig *config.ServiceConfig,
 	bridge binding.Bridge,
+	enableAntreaPolicy,
 	enableProxy,
 	proxyAll,
 	connectUplinkToBridge bool) *featureService {
@@ -113,6 +115,7 @@ func newFeatureService(
 		gatewayMAC:             nodeConfig.GatewayConfig.MAC,
 		gatewayPort:            nodeConfig.GatewayConfig.OFPort,
 		networkConfig:          networkConfig,
+		enableAntreaPolicy:     enableAntreaPolicy,
 		enableProxy:            enableProxy,
 		proxyAll:               proxyAll,
 		connectUplinkToBridge:  connectUplinkToBridge,
@@ -157,12 +160,14 @@ func (f *featureService) replayFlows() []binding.Flow {
 }
 
 func (f *featureService) replayGroups() {
+	var groups []binding.OFEntry
 	f.groupCache.Range(func(id, value interface{}) bool {
 		group := value.(binding.Group)
 		group.Reset()
-		if err := group.Add(); err != nil {
-			klog.Errorf("Error when replaying cached group %d: %v", id, err)
-		}
+		groups = append(groups, group)
 		return true
 	})
+	if err := f.bridge.AddOFEntriesInBundle(groups, nil, nil); err != nil {
+		klog.ErrorS(err, "error when replaying cached groups for Service")
+	}
 }

@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"antrea.io/antrea/pkg/antctl/raw/multicluster/common"
 )
@@ -27,30 +28,38 @@ import (
 type memberTokenOptions struct {
 	namespace string
 	output    string
+	k8sClient client.Client
 }
 
 var memberTokenOpts *memberTokenOptions
 
 var memberTokenExamples = strings.Trim(`
-# Create a member token.
+# Create a member token in the antrea-multicluster Namespace
   $ antctl mc create membertoken cluster-east-token -n antrea-multicluster
-# Create a member token and save the Secret manifest to a file.
+# Create a member token and save the Secret manifest to a file
   $ antctl mc create membertoken cluster-east-token -n antrea-multicluster -o token-secret.yml
 `, "\n")
 
-func (o *memberTokenOptions) validateAndComplete() error {
+func (o *memberTokenOptions) validateAndComplete(cmd *cobra.Command) error {
 	if o.namespace == "" {
-		return fmt.Errorf("the Namespace is required")
+		return fmt.Errorf("Namespace must be specified")
+	}
+	var err error
+	if o.k8sClient == nil {
+		o.k8sClient, err = common.NewClient(cmd)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func NewAccessTokenCmd() *cobra.Command {
+func NewMemberTokenCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:     "membertoken",
 		Args:    cobra.MaximumNArgs(1),
 		Short:   "Create a member token in a leader cluster",
-		Long:    "Create a member token in a leader cluster, which will be saved in a Secret. A ServiceAccount and a RoleBinding will be created too if they do not exist.",
+		Long:    "Create a member token in a leader cluster, which will be saved in a Secret. A ServiceAccount and a RoleBinding will be created too.",
 		Example: memberTokenExamples,
 		RunE:    memberTokenRunE,
 	}
@@ -64,40 +73,34 @@ func NewAccessTokenCmd() *cobra.Command {
 }
 
 func memberTokenRunE(cmd *cobra.Command, args []string) error {
-	if err := memberTokenOpts.validateAndComplete(); err != nil {
+	if err := memberTokenOpts.validateAndComplete(cmd); err != nil {
 		return err
 	}
-	if len(args) != 1 {
-		return fmt.Errorf("exactly one NAME is required, got %d", len(args))
+	if len(args) == 0 {
+		return fmt.Errorf("token name must be specified")
 	}
-	k8sClient, err := common.NewClient(cmd)
-	if err != nil {
-		return err
-	}
-
 	var createErr error
 	createdRes := []map[string]interface{}{}
 	defer func() {
 		if createErr != nil {
-			if err := common.Rollback(cmd, k8sClient, createdRes); err != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "Failed to rollback: %v\n", err)
-			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Failed to create the member token. Deleting the created resources\n")
+			common.Rollback(cmd, memberTokenOpts.k8sClient, createdRes)
 		}
 	}()
 
+	var err error
 	var file *os.File
 	if memberTokenOpts.output != "" {
 		if file, err = os.OpenFile(memberTokenOpts.output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err != nil {
 			return err
 		}
+		defer file.Close()
 	}
-	defer file.Close()
 
-	if createErr = common.CreateMemberToken(cmd, k8sClient, args[0], memberTokenOpts.namespace, file, &createdRes); createErr != nil {
+	if createErr = common.CreateMemberToken(cmd, memberTokenOpts.k8sClient, args[0], memberTokenOpts.namespace, file, &createdRes); createErr != nil {
 		return createErr
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "You can now run the \"antctl mc join\" command with the token to have the cluster join the ClusterSet\n")
-
+	fmt.Fprintf(cmd.OutOrStdout(), "You can now run \"antctl mc join\" command with the token in a member cluster to join the ClusterSet\n")
 	return nil
 }

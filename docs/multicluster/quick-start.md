@@ -3,6 +3,10 @@
 In this quick start guide, we will set up an Antrea Multi-cluster ClusterSet
 with two clusters. One cluster will serve as the leader of the ClusterSet, and
 meanwhile also join as a member cluster; another cluster will be a member only.
+Antrea Multi-cluster supports two types of IP addresses as multi-cluster
+Service endpoints - exported Services' ClusterIPs or backend Pod IPs.
+We use the default `ClusterIP` endpoint type for multi-cluster Services
+in this guide.
 
 The diagram below shows the two clusters and the ClusterSet to be created (for
 simplicity, the diagram just shows two Nodes for each cluster).
@@ -24,8 +28,10 @@ you can change the YAML manifest path to: `https://github.com/antrea-io/antrea/t
 when applying or downloading an Antrea YAML manifest.
 
 Antrea must be deployed in both cluster A and cluster B, and the `Multicluster`
-feature of `antrea-agent` must be enabled to support multi-cluster Services. The
-two clusters **must have non-overlapping Service CIDRs**. Set the following
+feature of `antrea-agent` must be enabled to support multi-cluster Services. As we
+use `ClusterIP` endpoint type for multi-cluster Services, an Antrea Multi-cluster
+Gateway needs be set up in each member cluster to route Service traffic across clusters,
+and two clusters **must have non-overlapping Service CIDRs**. Set the following
 configuration parameters in `antrea-agent.conf` of the Antrea deployment
 manifest to enable the `Multicluster` feature:
 
@@ -55,7 +61,8 @@ achieve the same using YAML manifests.
 To execute any command in this section, `antctl` needs access to the target
 cluster's API server, and it needs a kubeconfig file for that. Please refer to
 the [`antctl` Multi-cluster manual](antctl.md) to learn more about the
-kubeconfig file configuration, and the `antctl` Multi-cluster commands.
+kubeconfig file configuration, and the `antctl` Multi-cluster commands. For
+installation of `antctl`, please refer to the [installation guide](../antctl.md#installation).
 
 ### Set up Leader and Member in Cluster A
 
@@ -92,7 +99,7 @@ Run the following commands to create a ClusterSet with cluster A to be the
 leader, and also join the ClusterSet as a member.
 
 ```bash
-antctl mc init --clusterset test-clusterset --clusterid test-cluster-leader -n antrea-multicluster --create-token -o join-config.yml
+antctl mc init --clusterset test-clusterset --clusterid test-cluster-leader -n antrea-multicluster --create-token -j join-config.yml
 antctl mc join --clusterid test-cluster-leader -n kube-system --config-file join-config.yml
 ```
 
@@ -113,11 +120,11 @@ antctl mc join --clusterid test-cluster-leader -n kube-system --config-file join
 
 #### Step 3 - specify Multi-cluster Gateway Node
 
-Last, you need to choose a Node in cluster A to serve as the Multi-cluster
-Gateway. The Node should have an IP that is reachable from the cluster B's
-Gateway Node, so a tunnel can be created between the two Gateways. For more
-information about Multi-cluster Gateway, please refer to the [Multi-cluster
-User Guide](user-guide.md#multi-cluster-gateway-configuration).
+Last, you need to choose at least one Node in cluster A to serve as the
+Multi-cluster Gateway. The Node should have an IP that is reachable from the
+cluster B's Gateway Node, so a tunnel can be created between the two Gateways.
+For more information about Multi-cluster Gateway, please refer to the
+[Multi-cluster User Guide](user-guide.md#multi-cluster-gateway-configuration).
 
 Assuming K8s Node `node-a1` is selected for the Multi-cluster Gateway, run
 the following command to annotate the Node with:
