@@ -17,7 +17,7 @@ package memberlist
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"reflect"
 	"sync"
@@ -129,6 +129,7 @@ func NewCluster(
 	nodeName string,
 	nodeInformer coreinformers.NodeInformer,
 	externalIPPoolInformer crdinformers.ExternalIPPoolInformer,
+	transport memberlist.Transport, // Parameterized for testing, could be left nil for production code.
 ) (*Cluster, error) {
 	// The Node join/leave events will be notified via it.
 	nodeEventCh := make(chan memberlist.NodeEvent, 1024)
@@ -148,11 +149,12 @@ func NewCluster(
 
 	conf := memberlist.DefaultLocalConfig()
 	conf.Name = c.nodeName
+	conf.Transport = transport
 	conf.BindPort = c.bindPort
 	conf.AdvertisePort = c.bindPort
 	conf.AdvertiseAddr = nodeIP.String()
 	conf.Events = &memberlist.ChannelEventDelegate{Ch: nodeEventCh}
-	conf.LogOutput = ioutil.Discard
+	conf.LogOutput = io.Discard
 	klog.V(1).InfoS("New memberlist cluster", "config", conf)
 
 	mList, err := memberlist.Create(conf)

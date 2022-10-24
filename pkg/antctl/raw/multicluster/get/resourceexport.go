@@ -30,13 +30,12 @@ import (
 	"antrea.io/antrea/pkg/antctl/transform/resourceexport"
 )
 
-var cmdResourceExport *cobra.Command
-
 type resourceExportOptions struct {
 	namespace     string
 	outputFormat  string
 	allNamespaces bool
 	clusterID     string
+	k8sClient     client.Client
 }
 
 var optionsResourceExport *resourceExportOptions
@@ -54,19 +53,28 @@ Get the specified ResourceExport
 $ antctl mc get resourceexport <RESOURCEEXPORT> -n <NAMESPACE>
 `, "\n")
 
-func (o *resourceExportOptions) validateAndComplete() {
+func (o *resourceExportOptions) validateAndComplete(cmd *cobra.Command) error {
 	if o.allNamespaces {
 		o.namespace = metav1.NamespaceAll
-		return
-	}
-	if o.namespace == "" {
+	} else if o.namespace == "" {
 		o.namespace = metav1.NamespaceDefault
-		return
 	}
+	if o.k8sClient == nil {
+		kubeconfig, err := raw.ResolveKubeconfig(cmd)
+		if err != nil {
+			return err
+		}
+
+		o.k8sClient, err = client.New(kubeconfig, client.Options{Scheme: multiclusterscheme.Scheme})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func NewResourceExportCommand() *cobra.Command {
-	cmdResourceExport = &cobra.Command{
+	cmdResourceExport := &cobra.Command{
 		Use: "resourceexport",
 		Aliases: []string{
 			"resourceexports",
@@ -88,42 +96,39 @@ func NewResourceExportCommand() *cobra.Command {
 }
 
 func runEResourceExport(cmd *cobra.Command, args []string) error {
-	optionsResourceExport.validateAndComplete()
-
-	kubeconfig, err := raw.ResolveKubeconfig(cmd)
+	err := optionsResourceExport.validateAndComplete(cmd)
 	if err != nil {
 		return err
 	}
 
-	argsNum := len(args)
+	var resExports interface{}
 	singleResource := false
-	if argsNum > 0 {
+	if len(args) > 0 {
 		singleResource = true
 	}
-	var resExports []multiclusterv1alpha1.ResourceExport
-	k8sClient, err := client.New(kubeconfig, client.Options{Scheme: multiclusterscheme.Scheme})
-	if err != nil {
-		return err
+
+	if optionsResourceExport.allNamespaces && singleResource {
+		return fmt.Errorf("a resource cannot be retrieved by name across all Namespaces")
 	}
 
 	if singleResource {
 		resourceExportName := args[0]
 		resourceExport := multiclusterv1alpha1.ResourceExport{}
-		err = k8sClient.Get(context.TODO(), types.NamespacedName{
+		err = optionsResourceExport.k8sClient.Get(context.TODO(), types.NamespacedName{
 			Namespace: optionsResourceExport.namespace,
 			Name:      resourceExportName,
 		}, &resourceExport)
 		if err != nil {
 			return err
 		}
-		gvks, unversioned, err := k8sClient.Scheme().ObjectKinds(&resourceExport)
+		gvks, unversioned, err := optionsResourceExport.k8sClient.Scheme().ObjectKinds(&resourceExport)
 		if err != nil {
 			return err
 		}
 		if !unversioned && len(gvks) == 1 {
 			resourceExport.SetGroupVersionKind(gvks[0])
 		}
-		resExports = append(resExports, resourceExport)
+		resExports = resourceExport
 	} else {
 		var labels map[string]string
 		if optionsResourceExport.clusterID != "" {
@@ -132,25 +137,23 @@ func runEResourceExport(cmd *cobra.Command, args []string) error {
 		selector := metav1.LabelSelector{MatchLabels: labels}
 		labelSelector, _ := metav1.LabelSelectorAsSelector(&selector)
 		resourceExportList := &multiclusterv1alpha1.ResourceExportList{}
-		err = k8sClient.List(context.TODO(), resourceExportList, &client.ListOptions{
+		err = optionsResourceExport.k8sClient.List(context.TODO(), resourceExportList, &client.ListOptions{
 			Namespace:     optionsResourceExport.namespace,
 			LabelSelector: labelSelector,
 		})
 		if err != nil {
 			return err
 		}
+		if len(resourceExportList.Items) == 0 {
+			if optionsResourceExport.namespace != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "No ResourceExport found in Namespace %s\n", optionsResourceExport.namespace)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "No ResourceExport found")
+			}
+			return nil
+		}
 		resExports = resourceExportList.Items
 	}
 
-	if len(resExports) == 0 {
-		if optionsResourceExport.namespace != "" {
-			fmt.Fprintf(cmd.ErrOrStderr(), "No resources found in Namespace %s\n", optionsResourceExport.namespace)
-		} else {
-			fmt.Fprintln(cmd.ErrOrStderr(), "No resources found")
-		}
-		return nil
-	}
-
-	return output(resExports, false, optionsResourceExport.outputFormat, resourceexport.Transform)
-
+	return output(resExports, singleResource, optionsResourceExport.outputFormat, cmd.OutOrStdout(), resourceexport.Transform)
 }

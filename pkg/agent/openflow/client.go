@@ -84,9 +84,9 @@ type Client interface {
 	// InstallServiceGroup installs a group for Service LB. Each endpoint
 	// is a bucket of the group. For now, each bucket has the same weight.
 	InstallServiceGroup(groupID binding.GroupIDType, withSessionAffinity bool, endpoints []proxy.Endpoint) error
-	// UninstallGroup removes the group and its buckets that are
-	// installed by InstallServiceGroup or InstallMulticastGroup.
-	UninstallGroup(groupID binding.GroupIDType) error
+	// UninstallServiceGroup removes the group and its buckets that are
+	// installed by InstallServiceGroup.
+	UninstallServiceGroup(groupID binding.GroupIDType) error
 
 	// InstallEndpointFlows installs flows for accessing Endpoints.
 	// If an Endpoint is on the current Node, then flows for hairpin and endpoint
@@ -211,7 +211,7 @@ type Client interface {
 	InitialTLVMap() error
 
 	// Find Network Policy reference and OFpriority by conjunction ID.
-	GetPolicyInfoFromConjunction(ruleID uint32) (string, string)
+	GetPolicyInfoFromConjunction(ruleID uint32) (string, string, string)
 
 	// RegisterPacketInHandler uses SubscribePacketIn to get PacketIn message and process received
 	// packets through registered handlers.
@@ -314,6 +314,9 @@ type Client interface {
 	UninstallTrafficControlReturnPortFlow(returnOFPort uint32) error
 
 	InstallMulticastGroup(ofGroupID binding.GroupIDType, localReceivers []uint32, remoteNodeReceivers []net.IP) error
+	// UninstallMulticastGroup removes the group and its buckets that are
+	// installed by InstallMulticastGroup.
+	UninstallMulticastGroup(groupID binding.GroupIDType) error
 
 	// SendIGMPRemoteReportPacketOut sends the IGMP report packet as a packet-out to remote Nodes via the tunnel port.
 	SendIGMPRemoteReportPacketOut(
@@ -620,18 +623,25 @@ func (c *client) InstallServiceGroup(groupID binding.GroupIDType, withSessionAff
 	defer c.replayMutex.RUnlock()
 
 	group := c.featureService.serviceEndpointGroup(groupID, withSessionAffinity, endpoints...)
-	if err := group.Add(); err != nil {
-		return fmt.Errorf("error when installing Service Endpoints Group: %w", err)
+	_, installed := c.featureService.groupCache.Load(groupID)
+	if !installed {
+		if err := group.Add(); err != nil {
+			return fmt.Errorf("error when installing Service Endpoints Group %d: %w", groupID, err)
+		}
+	} else {
+		if err := group.Modify(); err != nil {
+			return fmt.Errorf("error when modifying Service Endpoints Group %d: %w", groupID, err)
+		}
 	}
 	c.featureService.groupCache.Store(groupID, group)
 	return nil
 }
 
-func (c *client) UninstallGroup(groupID binding.GroupIDType) error {
+func (c *client) UninstallServiceGroup(groupID binding.GroupIDType) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	if !c.bridge.DeleteGroup(groupID) {
-		return fmt.Errorf("group %d delete failed", groupID)
+	if err := c.bridge.DeleteGroup(groupID); err != nil {
+		return fmt.Errorf("error when deleting Service Endpoints Group %d: %w", groupID, err)
 	}
 	c.featureService.groupCache.Delete(groupID)
 	return nil
@@ -805,6 +815,7 @@ func (c *client) generatePipelines() {
 			c.networkConfig,
 			c.serviceConfig,
 			c.bridge,
+			c.enableAntreaPolicy,
 			c.enableProxy,
 			c.proxyAll,
 			c.connectUplinkToBridge)
@@ -1210,6 +1221,9 @@ func (c *client) InstallMulticastInitialFlows(pktInReason uint8) error {
 	flows := c.featureMulticast.igmpPktInFlows(pktInReason)
 	flows = append(flows, c.featureMulticast.externalMulticastReceiverFlow())
 	flows = append(flows, c.featureMulticast.multicastSkipIGMPMetricFlows()...)
+	if c.enableAntreaPolicy {
+		flows = append(flows, c.featureMulticast.igmpEgressFlow())
+	}
 	cacheKey := "multicast"
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
@@ -1322,6 +1336,16 @@ func (c *client) InstallMulticastGroup(groupID binding.GroupIDType, localReceive
 	return nil
 }
 
+func (c *client) UninstallMulticastGroup(groupID binding.GroupIDType) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+	if err := c.bridge.DeleteGroup(groupID); err != nil {
+		return fmt.Errorf("error when deleting Multicast receiver Group %d: %w", groupID, err)
+	}
+	c.featureMulticast.groupCache.Delete(groupID)
+	return nil
+}
+
 // InstallMulticlusterNodeFlows installs flows to handle cross-cluster packets between a regular
 // Node and a local Gateway.
 func (c *client) InstallMulticlusterNodeFlows(clusterID string,
@@ -1358,10 +1382,10 @@ func (c *client) InstallMulticlusterGatewayFlows(clusterID string,
 }
 
 // InstallMulticlusterClassifierFlows adds the following flows:
-// * One flow in L2ForwardingCalcTable for the global virtual multicluster MAC 'aa:bb:cc:dd:ee:f0'
-//   to set its target output port as 'antrea-tun0'. This flow will be on both Gateway and regular Node.
-// * One flow to match MC virtual MAC 'aa:bb:cc:dd:ee:f0' in ClassifierTable for Gateway only.
-// * One flow in L2ForwardingOutTable to allow multicluster hairpin traffic for Gateway only.
+//   - One flow in L2ForwardingCalcTable for the global virtual multicluster MAC 'aa:bb:cc:dd:ee:f0'
+//     to set its target output port as 'antrea-tun0'. This flow will be on both Gateway and regular Node.
+//   - One flow to match MC virtual MAC 'aa:bb:cc:dd:ee:f0' in ClassifierTable for Gateway only.
+//   - One flow in L2ForwardingOutTable to allow multicluster hairpin traffic for Gateway only.
 func (c *client) InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway bool) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()

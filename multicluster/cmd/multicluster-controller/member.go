@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
 	"antrea.io/antrea/pkg/log"
@@ -54,6 +55,13 @@ func runMember(o *Options) error {
 		return err
 	}
 
+	stopCh := signals.RegisterSignalHandlers()
+	hookServer := mgr.GetWebhookServer()
+	hookServer.Register("/validate-multicluster-crd-antrea-io-v1alpha1-gateway",
+		&webhook.Admission{Handler: &gatewayValidator{
+			Client:    mgr.GetClient(),
+			namespace: env.GetPodNamespace()}})
+
 	clusterSetReconciler := multiclustercontrollers.NewMemberClusterSetReconciler(mgr.GetClient(),
 		mgr.GetScheme(),
 		env.GetPodNamespace(),
@@ -66,16 +74,27 @@ func runMember(o *Options) error {
 	svcExportReconciler := multiclustercontrollers.NewServiceExportReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
-		commonAreaGetter)
+		commonAreaGetter,
+		o.EndpointIPType)
 	if err = svcExportReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating ServiceExport controller: %v", err)
 	}
+	labelIdentityReconciler := multiclustercontrollers.NewLabelIdentityReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		commonAreaGetter)
+	if err = labelIdentityReconciler.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("error creating LabelIdentity controller: %v", err)
+	}
+
+	go labelIdentityReconciler.Run(stopCh)
 
 	gwReconciler := multiclustercontrollers.NewGatewayReconciler(
 		mgr.GetClient(),
 		mgr.GetScheme(),
 		env.GetPodNamespace(),
 		opts.ServiceCIDR,
+		opts.PodCIDRs,
 		commonAreaGetter)
 	if err = gwReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating Gateway controller: %v", err)
@@ -90,7 +109,6 @@ func runMember(o *Options) error {
 		return fmt.Errorf("error creating Node controller: %v", err)
 	}
 
-	stopCh := signals.RegisterSignalHandlers()
 	staleController := multiclustercontrollers.NewStaleResCleanupController(
 		mgr.GetClient(),
 		mgr.GetScheme(),
