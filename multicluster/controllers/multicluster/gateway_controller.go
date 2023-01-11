@@ -19,7 +19,6 @@ package multicluster
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +43,7 @@ type (
 		namespace        string
 		localClusterID   string
 		serviceCIDR      string
+		podCIDRs         []string
 		leaderNamespace  string
 	}
 )
@@ -55,12 +55,14 @@ func NewGatewayReconciler(
 	scheme *runtime.Scheme,
 	namespace string,
 	serviceCIDR string,
+	podCIDRs []string,
 	commonAreaGetter RemoteCommonAreaGetter) *GatewayReconciler {
 	reconciler := &GatewayReconciler{
 		Client:           client,
 		Scheme:           scheme,
 		namespace:        namespace,
 		serviceCIDR:      serviceCIDR,
+		podCIDRs:         podCIDRs,
 		commonAreaGetter: commonAreaGetter,
 	}
 	return reconciler
@@ -99,18 +101,21 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		},
 	}
 
-	createOrUpdate := func(gwIP string, gwInfo *mcsv1alpha1.GatewayInfo) error {
+	createOrUpdate := func(gwIP string) error {
 		existingResExport := &mcsv1alpha1.ResourceExport{}
-		if err := commonArea.Get(ctx, resExportNamespacedName, existingResExport); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return err
-			}
+		err := commonArea.Get(ctx, resExportNamespacedName, existingResExport)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		if apierrors.IsNotFound(err) || !existingResExport.DeletionTimestamp.IsZero() {
 			if err = r.createResourceExport(ctx, req, commonArea, gwIP); err != nil {
 				return err
 			}
 			return nil
 		}
-		if err = r.updateResourceExport(ctx, req, commonArea, existingResExport, gwInfo); err != nil {
+		// updateResourceExport will update latest Gateway information with the existing ResourceExport's resourceVersion.
+		// It will return an error and retry when there is a version conflict.
+		if err = r.updateResourceExport(ctx, req, commonArea, existingResExport, &mcsv1alpha1.GatewayInfo{GatewayIP: gwIP}); err != nil {
 			return err
 		}
 		return nil
@@ -121,50 +126,16 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
-		gwInfo, err := r.getLastCreatedGateway()
-		if err != nil {
-			klog.ErrorS(err, "Failed to get Gateways")
-			return ctrl.Result{}, err
-		}
-		if gwInfo == nil {
-			// When the last Gateway is deleted, we will remove the ClusterInfo kind of ResourceExport
-			if err := commonArea.Delete(ctx, resExport, &client.DeleteOptions{}); err != nil {
-				return ctrl.Result{}, client.IgnoreNotFound(err)
-			}
-			return ctrl.Result{}, nil
-		}
-		// When there are still Gateways exist, we should create or update existing ResourceExport
-		// with the latest Gateway in remaining Gateways.
-		if err := createOrUpdate(gwInfo.GatewayIP, gwInfo); err != nil {
-			return ctrl.Result{}, err
+		if err := commonArea.Delete(ctx, resExport, &client.DeleteOptions{}); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 		return ctrl.Result{}, nil
 	}
-	if err := createOrUpdate(gw.GatewayIP, nil); err != nil {
+
+	if err := createOrUpdate(gw.GatewayIP); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
-}
-
-func (r *GatewayReconciler) getLastCreatedGateway() (*mcsv1alpha1.GatewayInfo, error) {
-	gws := &mcsv1alpha1.GatewayList{}
-	if err := r.Client.List(ctx, gws, &client.ListOptions{}); err != nil {
-		return nil, err
-	}
-	if len(gws.Items) == 0 {
-		return nil, nil
-	}
-
-	// Comparing Gateway's CreationTimestamp to get the last created Gateway.
-	lastCreatedGW := gws.Items[0]
-	for _, gw := range gws.Items {
-		if lastCreatedGW.CreationTimestamp.Before(&gw.CreationTimestamp) {
-			lastCreatedGW = gw
-		}
-	}
-
-	// Make sure we only return the last created Gateway for now.
-	return &mcsv1alpha1.GatewayInfo{GatewayIP: lastCreatedGW.GatewayIP}, nil
 }
 
 func (r *GatewayReconciler) updateResourceExport(ctx context.Context, req ctrl.Request,
@@ -175,22 +146,11 @@ func (r *GatewayReconciler) updateResourceExport(ctx context.Context, req ctrl.R
 		Name:      r.localClusterID,
 		Namespace: r.namespace,
 	}
-	var err error
-	if gwInfo == nil {
-		gwInfo, err = r.getLastCreatedGateway()
-		if err != nil {
-			return err
-		}
-	}
 	resExportSpec.ClusterInfo = &mcsv1alpha1.ClusterInfo{
 		ClusterID:    r.localClusterID,
 		ServiceCIDR:  r.serviceCIDR,
+		PodCIDRs:     r.podCIDRs,
 		GatewayInfos: []mcsv1alpha1.GatewayInfo{*gwInfo},
-	}
-	if reflect.DeepEqual(existingResExport.Spec, resExportSpec) {
-		klog.V(2).InfoS("Skip updating ClusterInfo kind of ResourceExport due to no change", "clusterinfo", klog.KObj(existingResExport),
-			"gateway", req.NamespacedName)
-		return nil
 	}
 	klog.V(2).InfoS("Updating ClusterInfo kind of ResourceExport", "clusterinfo", klog.KObj(existingResExport),
 		"gateway", req.NamespacedName)
@@ -212,6 +172,7 @@ func (r *GatewayReconciler) createResourceExport(ctx context.Context, req ctrl.R
 	resExportSpec.ClusterInfo = &mcsv1alpha1.ClusterInfo{
 		ClusterID:   r.localClusterID,
 		ServiceCIDR: r.serviceCIDR,
+		PodCIDRs:    r.podCIDRs,
 		GatewayInfos: []mcsv1alpha1.GatewayInfo{
 			{
 				GatewayIP: gatewayIP,
@@ -238,8 +199,8 @@ func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mcsv1alpha1.Gateway{}).
 		WithOptions(controller.Options{
-			// TODO: add a lock for serviceCIDR if there is any plan to
-			// increase this concurrent number.
+			// TODO: add a lock for r.serviceCIDR and r.localClusterID if
+			//  there is any plan to increase this concurrent number.
 			MaxConcurrentReconciles: 1,
 		}).
 		Complete(r)

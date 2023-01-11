@@ -16,7 +16,6 @@ package providers
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -82,7 +81,7 @@ func convertConfig(inConfig *ssh_config.Config, name string) (string, *ssh.Clien
 
 	identityFile := values["IdentityFile"]
 	// Read the private key identified by identityFile.
-	key, err := ioutil.ReadFile(identityFile)
+	key, err := os.ReadFile(identityFile)
 	if err != nil {
 		return "", nil, fmt.Errorf("unable to read private key from file '%s': %v", identityFile, err)
 	}
@@ -140,7 +139,7 @@ func (provider *VagrantProvider) GetKubeconfigPath() (string, error) {
 	}
 	kubeconfigPath := path.Join(vagrantPath, "playbook", "kube", "config")
 	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("Kubeconfig file not found at expected location '%s'", kubeconfigPath)
+		return "", fmt.Errorf("kubeconfig file not found at expected location '%s'", kubeconfigPath)
 	}
 	return kubeconfigPath, nil
 }

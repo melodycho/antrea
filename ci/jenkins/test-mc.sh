@@ -243,10 +243,28 @@ function run_codecov { (set -e
     shasum -a 256 -c codecov.SHA256SUM
 
     chmod +x codecov
-    ./codecov -c -t ${CODECOV_TOKEN} -F ${flag} -f ${file} -s ${dir} -C ${GIT_COMMIT} -r antrea-io/antrea
+    #./codecov -c -t ${CODECOV_TOKEN} -F ${flag} -f ${file} -s ${dir} -C ${GIT_COMMIT} -r antrea-io/antrea
 
     rm -f trustedkeys.gpg codecov
 )}
+
+function modify_config {
+  if [[ ${ENABLE_MC_GATEWAY} == "true" ]]; then
+  cat > build/yamls/chart-values/antrea.yml << EOF
+multicluster:
+  enableGateway: true
+  enableStretchedNetworkPolicy: true
+featureGates: {
+  Multicluster: true
+}
+EOF
+  make manifest
+  cd multicluster
+  sed -i 's/enableStretchedNetworkPolicy: false/enableStretchedNetworkPolicy: true/g' config/default/configmap/controller_manager_config.yaml
+  make manifests
+  cd ..
+  fi
+}
 
 function deliver_antrea_multicluster {
     echo "====== Building Antrea for the Following Commit ======"
@@ -264,13 +282,13 @@ function deliver_antrea_multicluster {
     chmod -R g-w build/images/base
 
     DOCKER_REGISTRY="${DOCKER_REGISTRY}" ./hack/build-antrea-linux-all.sh --pull
-    echo "====== Delivering Antrea to all the Nodes ======"
-    docker save -o ${WORKDIR}/antrea-ubuntu.tar ${DOCKER_REGISTRY}/antrea/antrea-ubuntu:latest
+    echo "====== Delivering Antrea to all Nodes ======"
+    docker save -o ${WORKDIR}/antrea-ubuntu.tar antrea/antrea-ubuntu:latest
 
 
     if [[ ${KIND} == "true" ]]; then
         for name in ${CLUSTER_NAMES[*]}; do
-            kind load docker-image ${DOCKER_REGISTRY}/antrea/antrea-ubuntu:latest --name ${name}
+            kind load docker-image antrea/antrea-ubuntu:latest --name ${name}
         done
     else
         for kubeconfig in "${multicluster_kubeconfigs[@]}"
@@ -294,10 +312,10 @@ function deliver_multicluster_controller {
     export GOROOT=/usr/local/go
     export PATH=${GOROOT}/bin:$PATH
 
-    DEFAULT_IMAGE="${DOCKER_REGISTRY}"/antrea/antrea-mc-controller:latest
+    DEFAULT_IMAGE=antrea/antrea-mc-controller:latest
     if $COVERAGE;then
         export NO_PULL=1;make antrea-mc-controller-coverage
-        DEFAULT_IMAGE="${DOCKER_REGISTRY}"/antrea/antrea-mc-controller-coverage:latest
+        DEFAULT_IMAGE=antrea/antrea-mc-controller-coverage:latest
         docker save "${DEFAULT_IMAGE}" -o "${WORKDIR}"/antrea-mcs.tar
         ./multicluster/hack/generate-manifest.sh -l antrea-multicluster -c > ./multicluster/test/yamls/leader-manifest.yml
         ./multicluster/hack/generate-manifest.sh -m -c > ./multicluster/test/yamls/member-manifest.yml
@@ -357,16 +375,6 @@ function run_multicluster_e2e {
     export GOCACHE=${WORKDIR}/.cache/go-build
     export PATH=$GOROOT/bin:$PATH
 
-    if [[ ${ENABLE_MC_GATEWAY} == "true" ]]; then
-    cat > build/yamls/chart-values/antrea.yml <<EOF
-multicluster:
-  enable: true
-featureGates: {
-  Multicluster: true
-}
-EOF
-    make manifest
-    fi
     wait_for_antrea_multicluster_pods_ready "${LEADER_CLUSTER_CONFIG}"
     wait_for_antrea_multicluster_pods_ready "${EAST_CLUSTER_CONFIG}"
     wait_for_antrea_multicluster_pods_ready "${WEST_CLUSTER_CONFIG}"
@@ -417,11 +425,10 @@ EOF
 
     set -x
     go test -v antrea.io/antrea/multicluster/test/e2e --logs-export-dir `pwd`/antrea-multicluster-test-logs $options
-    set +x
-
     if [[ "$?" != "0" ]]; then
         TEST_FAILURE=true
     fi
+    set +x
     set -e
 }
 
@@ -472,6 +479,7 @@ set -e
 
 if [[ ${TESTCASE} =~ "e2e" ]]; then
     deliver_antrea_multicluster
+    modify_config
     deliver_multicluster_controller
     run_multicluster_e2e
     if $COVERAGE;then

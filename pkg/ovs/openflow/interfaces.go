@@ -89,6 +89,9 @@ const (
 // IPDSCPToSRange stores the DSCP bits in ToS field of IP header.
 var IPDSCPToSRange = &Range{2, 7}
 
+// VLANVIDRange stores the VLAN VID range
+var VLANVIDRange = &Range{0, 11}
+
 // Bridge defines operations on an openflow bridge.
 type Bridge interface {
 	CreateTable(table Table, next uint8, missAction MissActionType) Table
@@ -96,7 +99,7 @@ type Bridge interface {
 	DeleteTable(id uint8) bool
 	CreateGroupTypeAll(id GroupIDType) Group
 	CreateGroup(id GroupIDType) Group
-	DeleteGroup(id GroupIDType) bool
+	DeleteGroup(id GroupIDType) error
 	CreateMeter(id MeterIDType, flags ofctrl.MeterFlag) Meter
 	DeleteMeter(id MeterIDType) bool
 	DeleteMeterAll() error
@@ -183,9 +186,9 @@ type OFEntry interface {
 	// Modify / Delete methods can be called on this object. This method
 	// should be called if a reconnection event happened.
 	Reset()
-	// GetBundleMessage returns ofctrl.OpenFlowModMessage which can be used in Bundle messages. operation specifies what
-	// operation is expected to be taken on the OFEntry.
-	GetBundleMessage(operation OFOperation) (ofctrl.OpenFlowModMessage, error)
+	// GetBundleMessages returns a slice of ofctrl.OpenFlowModMessage which can be used in Bundle messages. operation
+	// specifies what operation is expected to be taken on the OFEntry.
+	GetBundleMessages(operation OFOperation) ([]ofctrl.OpenFlowModMessage, error)
 }
 
 type Flow interface {
@@ -207,11 +210,9 @@ type Action interface {
 	LoadRegMark(marks ...*RegMark) FlowBuilder
 	LoadPktMarkRange(value uint32, to *Range) FlowBuilder
 	LoadIPDSCP(value uint8) FlowBuilder
-	LoadRange(name string, addr uint64, to *Range) FlowBuilder
 	Move(from, to string) FlowBuilder
 	MoveRange(fromName, toName string, from, to Range) FlowBuilder
 	MoveFromTunMetadata(fromTunMetadataID int, toField string, fromRange, toRange Range, tlvLength uint8) FlowBuilder
-	Resubmit(port uint16, table uint8) FlowBuilder
 	ResubmitToTables(tables ...uint8) FlowBuilder
 	CT(commit bool, tableID uint8, zone int, zoneSrcField *RegField) CTAction
 	Drop() FlowBuilder
@@ -228,6 +229,7 @@ type Action interface {
 	SetSrcIP(addr net.IP) FlowBuilder
 	SetDstIP(addr net.IP) FlowBuilder
 	SetTunnelDst(addr net.IP) FlowBuilder
+	SetTunnelID(tunnelID uint64) FlowBuilder
 	PopVLAN() FlowBuilder
 	PushVLAN(etherType uint16) FlowBuilder
 	SetVLAN(vlanID uint16) FlowBuilder
@@ -283,6 +285,7 @@ type FlowBuilder interface {
 	MatchICMPv6Type(icmp6Type byte) FlowBuilder
 	MatchICMPv6Code(icmp6Code byte) FlowBuilder
 	MatchTunnelDst(dstIP net.IP) FlowBuilder
+	MatchTunnelID(tunnelID uint64) FlowBuilder
 	MatchTunMetadata(index int, data uint32) FlowBuilder
 	MatchVLAN(nonVLAN bool, vlanId uint16, vlanMask *uint16) FlowBuilder
 	// MatchCTSrcIP matches the source IPv4 address of the connection tracker original direction tuple.
@@ -320,11 +323,10 @@ type LearnAction interface {
 	MatchLearnedDstIP() LearnAction
 	MatchLearnedSrcIPv6() LearnAction
 	MatchLearnedDstIPv6() LearnAction
-	MatchRegMark(mark *RegMark) LearnAction
-	LoadRegMark(mark *RegMark) LearnAction
+	MatchRegMark(marks ...*RegMark) LearnAction
+	LoadRegMark(marks ...*RegMark) LearnAction
 	LoadFieldToField(fromField, toField *RegField) LearnAction
 	LoadXXRegToXXReg(fromXXField, toXXField *XXRegField) LearnAction
-	SetDstMAC(mac net.HardwareAddr) LearnAction
 	Done() FlowBuilder
 }
 
@@ -363,7 +365,6 @@ type MeterBandBuilder interface {
 }
 
 type CTAction interface {
-	LoadToMark(value uint32) CTAction
 	LoadToCtMark(marks ...*CtMark) CTAction
 	// LoadToLabelField loads a data into ct_label field. If the expected label is larger than the max value of uint64
 	// (0xffffffffffffffff), call this function twice: one is to set the low 64 bits, and the other is to set the high
@@ -461,7 +462,6 @@ type Packet struct {
 type RegField struct {
 	regID int
 	rng   *Range
-	name  string
 }
 
 // RegMark is a value saved in a RegField. A RegMark is used to indicate the traffic
@@ -487,6 +487,5 @@ type CtMark struct {
 }
 
 type CtLabel struct {
-	rng  *Range
-	name string
+	rng *Range
 }

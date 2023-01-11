@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"antrea.io/libOpenflow/openflow15"
+	"antrea.io/libOpenflow/protocol"
 	"antrea.io/ofnet/ofctrl"
 )
 
@@ -28,6 +29,8 @@ type ofFlowBuilder struct {
 }
 
 func (b *ofFlowBuilder) MatchTunMetadata(index int, data uint32) FlowBuilder {
+	s := fmt.Sprintf("tun_metadata%d=0x%x", index, data)
+	b.matchers = append(b.matchers, s)
 	rng := openflow15.NewNXRange(0, 31)
 	tm := &ofctrl.NXTunMetadata{
 		ID:    index,
@@ -38,10 +41,39 @@ func (b *ofFlowBuilder) MatchTunMetadata(index int, data uint32) FlowBuilder {
 	return b
 }
 
-// MatchVLAN matches the VLAN VID. It holds the VLAN VID in its least significant 12 bits.
+// MatchVLAN can be used as follows:
+// - to match the packets of a specific VLAN, there are two cases:
+//   - to match VLAN 0, nonVLAN should be false, vlanID should be 0, value of vlanMask must be 0x1fff.
+//   - VLAN 1-4095, nonVLAN should be false, vlanID should be the VLAN ID, vlanMask can be nil, or its value can be 0x1fff.
+//
+// - to match the packets of all VLANs, nonVLAN should be false, vlanID must be 0, value of vlanMask must be 0x1000.
+// - to match the packets of non-VLAN, nonVLAN should be true, vlanID must be 0, vlanMask can be nil, or its value can be 0x1000.
 func (b *ofFlowBuilder) MatchVLAN(nonVLAN bool, vlanID uint16, vlanMask *uint16) FlowBuilder {
-	// TODO(gran): correct matchStr
-	matchStr := fmt.Sprintf("dl_vlan=%d", vlanID)
+	if vlanMask == nil {
+		var vlanMaskValue uint16
+		// To match the packets of a VLAN whose VLAN ID is not 0, when vlanMask is nil, set the value of vlanMask to 0x1ffff.
+		if vlanID != 0 {
+			vlanMaskValue = uint16(openflow15.OFPVID_PRESENT | protocol.VID_MASK)
+		}
+		// To match the packets of non-VLAN, when vlanMask is nil, set the value of vlanMask to 0x1000.
+		if nonVLAN {
+			vlanMaskValue = uint16(openflow15.OFPVID_PRESENT)
+		}
+		vlanMask = &vlanMaskValue
+	}
+
+	value := vlanID
+	if !nonVLAN {
+		value |= openflow15.OFPVID_PRESENT
+	}
+	mask := *vlanMask
+
+	var matchStr string
+	if mask == uint16(openflow15.OFPVID_PRESENT|protocol.VID_MASK) {
+		matchStr = fmt.Sprintf("dl_vlan=%d", value&protocol.VID_MASK)
+	} else {
+		matchStr = fmt.Sprintf("vlan_tci=0x%04x/0x%04x", value&openflow15.OFPVID_PRESENT, openflow15.OFPVID_PRESENT)
+	}
 	b.matchers = append(b.matchers, matchStr)
 	b.Match.NonVlan = nonVLAN
 	b.Match.VlanId = &vlanID
@@ -96,7 +128,8 @@ func (b *ofFlowBuilder) MatchXXReg(regID int, data []byte) FlowBuilder {
 
 // matchRegRange adds match condition for matching data in the target register at specified range.
 func (b *ofFlowBuilder) matchRegRange(regID int, data uint32, rng *Range) FlowBuilder {
-	s := fmt.Sprintf("reg%d[%d..%d]=0x%x", regID, rng[0], rng[1], data)
+	mask := rng.ToNXRange().ToUint32Mask()
+	s := fmt.Sprintf("reg%d=0x%x/0x%x", regID, (data<<rng.Offset())&mask, mask)
 	b.matchers = append(b.matchers, s)
 	reg := &ofctrl.NXRegister{
 		ID:    regID,
@@ -140,7 +173,7 @@ func (b *ofFlowBuilder) MatchCTStateNew(set bool) FlowBuilder {
 		b.addCTStateString("+new")
 	} else {
 		b.ctStates.UnsetNew()
-		b.addCTStateString("-trk")
+		b.addCTStateString("-new")
 	}
 	return b
 }
@@ -293,6 +326,13 @@ func (b *ofFlowBuilder) MatchTunnelDst(dstIP net.IP) FlowBuilder {
 	return b
 }
 
+// MatchTunnelID adds match condition for matching tun_id.
+func (b *ofFlowBuilder) MatchTunnelID(tunnelID uint64) FlowBuilder {
+	b.matchers = append(b.matchers, fmt.Sprintf("tun_id=%d", tunnelID))
+	b.ofFlow.Match.TunnelId = tunnelID
+	return b
+}
+
 func ctLabelRange(high, low uint64, rng *Range, match *ofctrl.FlowMatch) {
 	// [127..64] [63..0]
 	//   high     low
@@ -300,31 +340,31 @@ func ctLabelRange(high, low uint64, rng *Range, match *ofctrl.FlowMatch) {
 	match.CtLabelLo = low
 	match.CtLabelHiMask = 0xffff_ffff_ffff_ffff
 	match.CtLabelLoMask = 0xffff_ffff_ffff_ffff
-	if rng[0] == rng[1] {
-		if rng[0] < 64 {
-			match.CtLabelLoMask = 1 << rng[0]
-			match.CtLabelHiMask = 0
-		} else {
-			match.CtLabelHiMask = 1 << (rng[0] - 64)
-			match.CtLabelLoMask = 0
-		}
-	} else if rng[0] < 64 && rng[1] >= 64 {
-		match.CtLabelLoMask <<= rng[0]
-		match.CtLabelHiMask >>= 127 - rng[1]
-	} else if rng[1] < 64 {
+	if rng[1] < 64 {
 		match.CtLabelLoMask &= 0xffff_ffff_ffff_ffff << rng[0]
 		match.CtLabelLoMask &= 0xffff_ffff_ffff_ffff >> (63 - rng[1])
+		match.CtLabelHi = 0
 		match.CtLabelHiMask = 0
 	} else if rng[0] >= 64 {
 		match.CtLabelHiMask &= 0xffff_ffff_ffff_ffff << (rng[0] - 64)
 		match.CtLabelHiMask &= 0xffff_ffff_ffff_ffff >> (127 - rng[1])
+		match.CtLabelLo = 0
 		match.CtLabelLoMask = 0
+	} else {
+		match.CtLabelLoMask <<= rng[0]
+		match.CtLabelHiMask >>= 127 - rng[1]
 	}
 }
 
 func (b *ofFlowBuilder) MatchCTLabelField(high, low uint64, field *CtLabel) FlowBuilder {
-	b.matchers = append(b.matchers, fmt.Sprintf("ct_label[%d..%d]=0x%x%x", field.rng[0], field.rng[1], high, low))
 	ctLabelRange(high, low, field.GetRange(), &b.ofFlow.Match)
+	var matchStr string
+	if field.rng[1] < 64 {
+		matchStr = fmt.Sprintf("ct_label=0x%x/0x%x", b.ofFlow.Match.CtLabelLo, b.ofFlow.Match.CtLabelLoMask)
+	} else {
+		matchStr = fmt.Sprintf("ct_label=0x%x%016x/0x%x%016x", b.ofFlow.Match.CtLabelHi, b.ofFlow.Match.CtLabelLo, b.ofFlow.Match.CtLabelHiMask, b.ofFlow.Match.CtLabelLoMask)
+	}
+	b.matchers = append(b.matchers, matchStr)
 	return b
 }
 
@@ -371,13 +411,13 @@ func (b *ofFlowBuilder) MatchICMPCode(icmpCode byte) FlowBuilder {
 }
 
 func (b *ofFlowBuilder) MatchICMPv6Type(icmp6Type byte) FlowBuilder {
-	b.matchers = append(b.matchers, fmt.Sprintf("icmpv6_type=%d", icmp6Type))
+	b.matchers = append(b.matchers, fmt.Sprintf("icmp_type=%d", icmp6Type))
 	b.Match.Icmp6Type = &icmp6Type
 	return b
 }
 
 func (b *ofFlowBuilder) MatchICMPv6Code(icmp6Code byte) FlowBuilder {
-	b.matchers = append(b.matchers, fmt.Sprintf("icmpv6_code=%d", icmp6Code))
+	b.matchers = append(b.matchers, fmt.Sprintf("icmp_code=%d", icmp6Code))
 	b.Match.Icmp6Code = &icmp6Code
 	return b
 }
@@ -521,7 +561,7 @@ func (b *ofFlowBuilder) MatchProtocol(protocol Protocol) FlowBuilder {
 	return b
 }
 
-// MatchProtocol adds match condition for IP protocol with the intetger value.
+// MatchIPProtocolValue adds match condition for IP protocol with the integer value.
 func (b *ofFlowBuilder) MatchIPProtocolValue(isIPv6 bool, protoValue uint8) FlowBuilder {
 	if isIPv6 {
 		b.Match.Ethertype = 0x86dd
@@ -539,7 +579,7 @@ func (b *ofFlowBuilder) MatchDstPort(port uint16, portMask *uint16) FlowBuilder 
 	b.Match.DstPortMask = portMask
 	matchStr := fmt.Sprintf("tp_dst=0x%x", port)
 	if portMask != nil {
-		matchStr = fmt.Sprintf("%s/0x%x", matchStr, portMask)
+		matchStr = fmt.Sprintf("%s/0x%x", matchStr, *portMask)
 	}
 	b.matchers = append(b.matchers, matchStr)
 	return b
@@ -552,7 +592,7 @@ func (b *ofFlowBuilder) MatchSrcPort(port uint16, portMask *uint16) FlowBuilder 
 	b.Match.SrcPortMask = portMask
 	matchStr := fmt.Sprintf("tp_src=0x%x", port)
 	if portMask != nil {
-		matchStr = fmt.Sprintf("%s/0x%x", matchStr, portMask)
+		matchStr = fmt.Sprintf("%s/0x%x", matchStr, *portMask)
 	}
 	b.matchers = append(b.matchers, matchStr)
 	return b
@@ -562,16 +602,27 @@ func (b *ofFlowBuilder) MatchSrcPort(port uint16, portMask *uint16) FlowBuilder 
 // a match to valid connection tracking state as a prerequisite, and valid connection tracking state matches include
 // "+new", "+est", "+rel" and "+trk-inv".
 func (b *ofFlowBuilder) MatchCTSrcIP(ip net.IP) FlowBuilder {
-	b.Match.CtIpSa = &ip
-	b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_src=%s", ip.String()))
+	if ip.To4() != nil {
+		b.Match.CtIpSa = &ip
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_src=%s", ip.String()))
+	} else {
+		b.Match.CtIpv6Sa = &ip
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_ipv6_src=%s", ip.String()))
+	}
 	return b
 }
 
 // MatchCTSrcIPNet is the same as MatchCTSrcIP but supports IP masking.
 func (b *ofFlowBuilder) MatchCTSrcIPNet(ipNet net.IPNet) FlowBuilder {
-	b.matchers = append(b.matchers, fmt.Sprintf("nw_dst=%s", ipNet.String()))
-	b.Match.CtIpSa = &ipNet.IP
-	b.Match.CtIpSaMask = maskToIP(ipNet.Mask)
+	if ipNet.IP.To4() != nil {
+		b.Match.CtIpSa = &ipNet.IP
+		b.Match.CtIpSaMask = maskToIP(ipNet.Mask)
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_src=%s", ipNet.String()))
+	} else {
+		b.Match.CtIpv6Sa = &ipNet.IP
+		b.Match.CtIpv6SaMask = maskToIP(ipNet.Mask)
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_ipv6_src=%s", ipNet.String()))
+	}
 	return b
 }
 
@@ -579,16 +630,27 @@ func (b *ofFlowBuilder) MatchCTSrcIPNet(ipNet net.IPNet) FlowBuilder {
 // requires a match to valid connection tracking state as a prerequisite, and valid connection tracking state matches
 // include "+new", "+est", "+rel" and "+trk-inv".
 func (b *ofFlowBuilder) MatchCTDstIP(ip net.IP) FlowBuilder {
-	b.Match.CtIpDa = &ip
-	b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_dst=%s", ip.String()))
+	if ip.To4() != nil {
+		b.Match.CtIpDa = &ip
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_dst=%s", ip.String()))
+	} else {
+		b.Match.CtIpv6Da = &ip
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_ipv6_dst=%s", ip.String()))
+	}
 	return b
 }
 
 // MatchCTDstIPNet is the same as MatchCTDstIP but supports IP masking.
 func (b *ofFlowBuilder) MatchCTDstIPNet(ipNet net.IPNet) FlowBuilder {
-	b.Match.CtIpDa = &ipNet.IP
-	b.Match.CtIpDaMask = maskToIP(ipNet.Mask)
-	b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_dst=%s", ipNet.String()))
+	if ipNet.IP.To4() != nil {
+		b.Match.CtIpDa = &ipNet.IP
+		b.Match.CtIpDaMask = maskToIP(ipNet.Mask)
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_dst=%s", ipNet.String()))
+	} else {
+		b.Match.CtIpv6Da = &ipNet.IP
+		b.Match.CtIpv6DaMask = maskToIP(ipNet.Mask)
+		b.matchers = append(b.matchers, fmt.Sprintf("ct_ipv6_dst=%s", ipNet.String()))
+	}
 	return b
 }
 
@@ -615,14 +677,16 @@ func (b *ofFlowBuilder) MatchCTDstPort(port uint16) FlowBuilder {
 // "+new", "+est", "+rel" and "+trk-inv".
 func (b *ofFlowBuilder) MatchCTProtocol(proto Protocol) FlowBuilder {
 	switch proto {
-	case ProtocolTCP:
+	case ProtocolTCP, ProtocolTCPv6:
 		b.Match.CtIpProto = 6
-	case ProtocolUDP:
+	case ProtocolUDP, ProtocolUDPv6:
 		b.Match.CtIpProto = 17
-	case ProtocolSCTP:
+	case ProtocolSCTP, ProtocolSCTPv6:
 		b.Match.CtIpProto = 132
 	case ProtocolICMP:
 		b.Match.CtIpProto = 1
+	case ProtocolICMPv6:
+		b.Match.CtIpProto = 58
 	}
 	b.matchers = append(b.matchers, fmt.Sprintf("ct_nw_proto=%d", b.Match.CtIpProto))
 	return b

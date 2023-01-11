@@ -110,29 +110,32 @@ func normalizeServices(services []v1beta2.Service) servicesKey {
 // if an ingress rule applies to 3 Pods like below:
 //
 // NetworkPolicy rule:
-// spec:
-//  ingress:
-//  - from:
-//    - namespaceSelector: {}
-//    ports:
-//    - port: http
-//      protocol: TCP
+//
+//	spec:
+//	 ingress:
+//	 - from:
+//	   - namespaceSelector: {}
+//	   ports:
+//	   - port: http
+//	     protocol: TCP
 //
 // Pod A and Pod B:
-// spec:
-//   containers:
-//   - ports:
-//     - containerPort: 80
-//       name: http
-//       protocol: TCP
+//
+//	spec:
+//	  containers:
+//	  - ports:
+//	    - containerPort: 80
+//	      name: http
+//	      protocol: TCP
 //
 // Pod C:
-// spec:
-//   containers:
-//   - ports:
-//     - containerPort: 8080
-//       name: http
-//       protocol: TCP
+//
+//	spec:
+//	  containers:
+//	  - ports:
+//	    - containerPort: 8080
+//	      name: http
+//	      protocol: TCP
 //
 // Then Pod A and B will share an Openflow rule as both of them resolve "http" to 80,
 // while Pod C will have another Openflow rule as it resolves "http" to 8080.
@@ -547,6 +550,8 @@ func (r *reconciler) computeOFRulesForAdd(rule *CompletedRule, ofPriority *uint1
 		from1 := groupMembersToOFAddresses(rule.FromAddresses)
 		// Get addresses that in From IPBlock but not in Except IPBlocks.
 		from2 := ipBlocksToOFAddresses(rule.From.IPBlocks, r.ipv4Enabled, r.ipv6Enabled, isRuleAppliedToService)
+		from3 := labelIDToOFAddresses(rule.From.LabelIdentities)
+		from := append(from1, append(from2, from3...)...)
 		membersByServicesMap, servicesMap := groupMembersByServices(rule.Services, rule.TargetMembers)
 		for svcKey, members := range membersByServicesMap {
 			var toAddresses []types.Address
@@ -564,9 +569,11 @@ func (r *reconciler) computeOFRulesForAdd(rule *CompletedRule, ofPriority *uint1
 			}
 			ofRuleByServicesMap[svcKey] = &types.PolicyRule{
 				Direction:     v1beta2.DirectionIn,
-				From:          append(from1, from2...),
+				From:          from,
 				To:            toAddresses,
 				Service:       filterUnresolvablePort(servicesMap[svcKey]),
+				L7Protocols:   rule.L7Protocols,
+				L7RuleVlanID:  rule.L7RuleVlanID,
 				Action:        rule.Action,
 				Name:          rule.Name,
 				Priority:      ofPriority,
@@ -595,6 +602,8 @@ func (r *reconciler) computeOFRulesForAdd(rule *CompletedRule, ofPriority *uint1
 				From:          from,
 				To:            groupMembersToOFAddresses(members),
 				Service:       filterUnresolvablePort(servicesMap[svcKey]),
+				L7Protocols:   rule.L7Protocols,
+				L7RuleVlanID:  rule.L7RuleVlanID,
 				Action:        rule.Action,
 				Priority:      ofPriority,
 				Name:          rule.Name,
@@ -716,6 +725,8 @@ func (r *reconciler) update(lastRealized *lastRealized, newRule *CompletedRule, 
 				Direction:     v1beta2.DirectionIn,
 				To:            ofPortsToOFAddresses(newOFPorts),
 				Service:       newRule.Services,
+				L7Protocols:   newRule.L7Protocols,
+				L7RuleVlanID:  newRule.L7RuleVlanID,
 				Action:        newRule.Action,
 				Priority:      ofPriority,
 				FlowID:        ofID,
@@ -771,6 +782,8 @@ func (r *reconciler) update(lastRealized *lastRealized, newRule *CompletedRule, 
 					From:          append(from1, from2...),
 					To:            toAddresses,
 					Service:       filterUnresolvablePort(servicesMap[svcKey]),
+					L7Protocols:   newRule.L7Protocols,
+					L7RuleVlanID:  newRule.L7RuleVlanID,
 					Action:        newRule.Action,
 					Priority:      ofPriority,
 					FlowID:        ofID,
@@ -840,6 +853,8 @@ func (r *reconciler) update(lastRealized *lastRealized, newRule *CompletedRule, 
 					From:          from,
 					To:            groupMembersToOFAddresses(members),
 					Service:       filterUnresolvablePort(servicesMap[svcKey]),
+					L7Protocols:   newRule.L7Protocols,
+					L7RuleVlanID:  newRule.L7RuleVlanID,
 					Action:        newRule.Action,
 					Priority:      ofPriority,
 					FlowID:        ofID,
@@ -1202,6 +1217,15 @@ func ipBlocksToOFAddresses(ipBlocks []v1beta2.IPBlock, ipv4Enabled, ipv6Enabled,
 		}
 	}
 
+	return addresses
+}
+
+func labelIDToOFAddresses(labelIDs []uint32) []types.Address {
+	// Must not return nil as it means not restricted by addresses in Openflow implementation.
+	addresses := make([]types.Address, 0, len(labelIDs))
+	for _, labelID := range labelIDs {
+		addresses = append(addresses, openflow.NewLabelIDAddress(labelID))
+	}
 	return addresses
 }
 

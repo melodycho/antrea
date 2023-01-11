@@ -17,8 +17,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v2"
@@ -85,6 +85,10 @@ func (o *Options) validate(args []string) error {
 		klog.InfoS("The legacyCRDMirroring config option is deprecated and will be ignored (no CRD mirroring)")
 	}
 
+	if !features.DefaultFeatureGate.Enabled(features.Multicluster) && o.config.Multicluster.EnableStretchedNetworkPolicy {
+		klog.InfoS("Multicluster feature gate is disabled. Multicluster.EnableStretchedNetworkPolicy is ignored")
+	}
+
 	return nil
 }
 
@@ -148,7 +152,7 @@ func (o *Options) validateNodeIPAMControllerOptions() error {
 }
 
 func (o *Options) loadConfigFromFile() error {
-	data, err := ioutil.ReadFile(o.configFile)
+	data, err := os.ReadFile(o.configFile)
 	if err != nil {
 		return err
 	}

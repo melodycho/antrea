@@ -429,11 +429,13 @@ func (c *Controller) processNextWorkItem() bool {
 
 // syncNode manages connectivity to "peer" Node with name nodeName
 // If we have not established connectivity to the Node yet:
-//   * we install the appropriate Linux route:
+//   - we install the appropriate Linux route:
+//
 // Destination     Gateway         Use Iface
 // peerPodCIDR     peerGatewayIP   localGatewayIface (e.g antrea-gw0)
-//   * we install the appropriate OpenFlow flows to ensure that all the traffic destined to
-//   peerPodCIDR goes through the correct L3 tunnel.
+//   - we install the appropriate OpenFlow flows to ensure that all the traffic destined to
+//     peerPodCIDR goes through the correct L3 tunnel.
+//
 // If the Node no longer exists (cannot be retrieved by name from nodeLister) we delete the route
 // and OpenFlow flows associated with it.
 func (c *Controller) syncNodeRoute(nodeName string) error {
@@ -702,8 +704,8 @@ func (c *Controller) createIPSecTunnelPort(nodeName string, nodeIP net.IP) (int3
 			nodeIP,
 			psk,
 			remoteName,
+			ovsPortConfig,
 		)
-		interfaceConfig.OVSPortConfig = ovsPortConfig
 		c.interfaceStore.AddInterface(interfaceConfig)
 	}
 	// GetOFPort will wait for up to 1 second for OVSDB to report the OFPort number.
@@ -744,6 +746,7 @@ func ParseTunnelInterfaceConfig(
 			remoteIP,
 			psk,
 			remoteName,
+			portConfig,
 		)
 	} else {
 		interfaceConfig = interfacestore.NewTunnelInterface(
@@ -751,9 +754,9 @@ func ParseTunnelInterfaceConfig(
 			ovsconfig.TunnelType(portData.IFType),
 			tunnelPort,
 			localIP,
-			csum)
+			csum,
+			portConfig)
 	}
-	interfaceConfig.OVSPortConfig = portConfig
 	return interfaceConfig
 }
 

@@ -38,6 +38,7 @@ const (
 	ComponentRouting       TraceflowComponent = "Routing"
 	ComponentNetworkPolicy TraceflowComponent = "NetworkPolicy"
 	ComponentForwarding    TraceflowComponent = "Forwarding"
+	ComponentEgress        TraceflowComponent = "Egress"
 )
 
 type TraceflowAction string
@@ -51,6 +52,8 @@ const (
 	// ActionForwardedOutOfOverlay indicates that the packet has been forwarded out of the network
 	// managed by Antrea. This indicates that the Traceflow request can be considered complete.
 	ActionForwardedOutOfOverlay TraceflowAction = "ForwardedOutOfOverlay"
+	ActionMarkedForSNAT         TraceflowAction = "MarkedForSNAT"
+	ActionForwardedToEgressNode TraceflowAction = "ForwardedToEgressNode"
 )
 
 // List the supported protocols and their codes in traceflow.
@@ -264,6 +267,8 @@ type Observation struct {
 	DstMAC string `json:"dstMAC,omitempty" yaml:"dstMAC,omitempty"`
 	// NetworkPolicy is the combination of Namespace and NetworkPolicyName.
 	NetworkPolicy string `json:"networkPolicy,omitempty" yaml:"networkPolicy,omitempty"`
+	// Egress is the name of the Egress.
+	Egress string `json:"egress,omitempty" yaml:"egress,omitempty"`
 	// TTL is the observation TTL.
 	TTL int32 `json:"ttl,omitempty" yaml:"ttl,omitempty"`
 	// TranslatedSrcIP is the translated source IP.
@@ -272,6 +277,7 @@ type Observation struct {
 	TranslatedDstIP string `json:"translatedDstIP,omitempty" yaml:"translatedDstIP,omitempty"`
 	// TunnelDstIP is the tunnel destination IP.
 	TunnelDstIP string `json:"tunnelDstIP,omitempty" yaml:"tunnelDstIP,omitempty"`
+	EgressIP    string `json:"egressIP,omitempty" yaml:"egressIP,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -311,7 +317,7 @@ type NetworkPolicySpec struct {
 	// Select workloads on which the rules will be applied to. Cannot be set in
 	// conjunction with AppliedTo in each rule.
 	// +optional
-	AppliedTo []NetworkPolicyPeer `json:"appliedTo,omitempty"`
+	AppliedTo []AppliedTo `json:"appliedTo,omitempty"`
 	// Set of ingress rules evaluated based on the order in which they are set.
 	// Currently Ingress rule supports setting the `From` field but not the `To`
 	// field within a Rule.
@@ -342,9 +348,10 @@ const (
 
 // These are valid conditions of a deployment.
 const (
-	// NetworkPolicyConditionRealizable means the condition stores information about
-	// various realizable conditions of the NetworkPolicy.
+	// NetworkPolicyConditionRealizable reports whether the NetworkPolicy is realizable and the reasons why it is not.
 	NetworkPolicyConditionRealizable NetworkPolicyConditionType = "Realizable"
+	// NetworkPolicyConditionRealizationFailure reports information about a failure when realizing the NetworkPolicy on a Node.
+	NetworkPolicyConditionRealizationFailure NetworkPolicyConditionType = "RealizationFailure"
 )
 
 // NetworkPolicyCondition describes the state of a NetworkPolicy at a certain point.
@@ -392,6 +399,12 @@ type Rule struct {
 	// empty, this rule matches all protocols supported.
 	// +optional
 	Protocols []NetworkPolicyProtocol `json:"protocols,omitempty"`
+	// Set of layer 7 protocols matched by the rule. If this field is set, action can only be Allow.
+	// When this field is used in a rule, any traffic matching the other layer 3/4 criteria of the rule (typically the
+	// 5-tuple) will be forwarded to an application-aware engine for protocol detection and rule enforcement, and the
+	// traffic will be allowed if the layer 7 criteria is also matched, otherwise it will be dropped. Therefore, any
+	// rules after a layer 7 rule will not be enforced for the traffic.
+	L7Protocols []L7Protocol `json:"l7Protocols,omitempty"`
 	// Rule is matched if traffic originates from workloads selected by
 	// this field. If this field is empty, this rule matches all sources.
 	// +optional
@@ -402,12 +415,15 @@ type Rule struct {
 	// +optional
 	To []NetworkPolicyPeer `json:"to,omitempty"`
 	// Rule is matched if traffic is intended for a Service listed in this field.
-	// Currently only ClusterIP types Services are supported in this field. This field
-	// can only be used when AntreaProxy is enabled. This field can't be used with To
-	// or Ports. If this field and To are both empty or missing, this rule matches all
-	// destinations.
+	// Currently, only ClusterIP types Services are supported in this field.
+	// When scope is set to ClusterSet, it matches traffic intended for a multi-cluster
+	// Service listed in this field. Service name and Namespace provided should match
+	// the original exported Service.
+	// This field can only be used when AntreaProxy is enabled. This field can't be used
+	// with To or Ports. If this field and To are both empty or missing, this rule matches
+	// all destinations.
 	// +optional
-	ToServices []NamespacedName `json:"toServices,omitempty"`
+	ToServices []PeerService `json:"toServices,omitempty"`
 	// Name describes the intention of this rule.
 	// Name should be unique within the policy.
 	// +optional
@@ -419,7 +435,7 @@ type Rule struct {
 	// Select workloads on which this rule will be applied to. Cannot be set in
 	// conjunction with NetworkPolicySpec/ClusterNetworkPolicySpec.AppliedTo.
 	// +optional
-	AppliedTo []NetworkPolicyPeer `json:"appliedTo,omitempty"`
+	AppliedTo []AppliedTo `json:"appliedTo,omitempty"`
 }
 
 // NetworkPolicyPeer describes the grouping selector of workloads.
@@ -430,7 +446,7 @@ type NetworkPolicyPeer struct {
 	// +optional
 	IPBlock *IPBlock `json:"ipBlock,omitempty"`
 	// Select Pods from NetworkPolicy's Namespace as workloads in
-	// AppliedTo/To/From fields. If set with NamespaceSelector, Pods are
+	// To/From fields. If set with NamespaceSelector, Pods are
 	// matched from Namespaces matched by the NamespaceSelector.
 	// Cannot be set with any other selector except NamespaceSelector.
 	// +optional
@@ -442,7 +458,7 @@ type NetworkPolicyPeer struct {
 	// ExternalEntitySelector. Cannot be set with Namespaces.
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
-	// Select Pod/ExternalEntity from Namespaces matched by specifc criteria.
+	// Select Pod/ExternalEntity from Namespaces matched by specific criteria.
 	// Current supported criteria is match: Self, which selects from the same
 	// Namespace of the appliedTo workloads.
 	// Cannot be set with any other selector except PodSelector or
@@ -452,16 +468,15 @@ type NetworkPolicyPeer struct {
 	// +optional
 	Namespaces *PeerNamespaces `json:"namespaces,omitempty"`
 	// Select ExternalEntities from NetworkPolicy's Namespace as workloads
-	// in AppliedTo/To/From fields. If set with NamespaceSelector,
+	// in To/From fields. If set with NamespaceSelector,
 	// ExternalEntities are matched from Namespaces matched by the
 	// NamespaceSelector.
 	// Cannot be set with any other selector except NamespaceSelector.
 	// +optional
 	ExternalEntitySelector *metav1.LabelSelector `json:"externalEntitySelector,omitempty"`
-	// Group is the name of the ClusterGroup which can be set as an
-	// AppliedTo or within an Ingress or Egress rule in place of
-	// a stand-alone selector. A Group cannot be set with any other
-	// selector.
+	// Group is the name of the ClusterGroup which can be set within
+	// an Ingress or Egress rule in place of a stand-alone selector.
+	// A Group cannot be set with any other selector.
 	Group string `json:"group,omitempty"`
 	// Restrict egress access to the Fully Qualified Domain Names prescribed
 	// by name or by wildcard match patterns. This field can only be set for
@@ -471,7 +486,7 @@ type NetworkPolicyPeer struct {
 	//  Wildcard expressions, i.e. "*wayfair.com".
 	FQDN string `json:"fqdn,omitempty"`
 	// Select all Pods with the ServiceAccount matched by this field, as
-	// workloads in AppliedTo/To/From fields.
+	// workloads in To/From fields.
 	// Cannot be set with any other selector.
 	// +optional
 	ServiceAccount *NamespacedName `json:"serviceAccount,omitempty"`
@@ -479,6 +494,45 @@ type NetworkPolicyPeer struct {
 	// A NodeSelector cannot be set in AppliedTo field or set with any other selector.
 	// +optional
 	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+	// Define scope of the Pod/NamespaceSelector(s) of this peer.
+	// Can only be used in ingress NetworkPolicyPeers.
+	// Defaults to "Cluster".
+	// +optional
+	Scope PeerScope `json:"scope,omitempty"`
+}
+
+// AppliedTo describes the grouping selector of workloads in AppliedTo field.
+type AppliedTo struct {
+	// Select Pods from NetworkPolicy's Namespace as workloads in
+	// AppliedTo fields. If set with NamespaceSelector, Pods are
+	// matched from Namespaces matched by the NamespaceSelector.
+	// Cannot be set with any other selector except NamespaceSelector.
+	// +optional
+	PodSelector *metav1.LabelSelector `json:"podSelector,omitempty"`
+	// Select all Pods from Namespaces matched by this selector, as
+	// workloads in AppliedTo fields. If set with PodSelector,
+	// Pods are matched from Namespaces matched by the NamespaceSelector.
+	// Cannot be set with any other selector except PodSelector or
+	// ExternalEntitySelector. Cannot be set with Namespaces.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+	// Select ExternalEntities from NetworkPolicy's Namespace as workloads
+	// in AppliedTo fields. If set with NamespaceSelector,
+	// ExternalEntities are matched from Namespaces matched by the
+	// NamespaceSelector.
+	// Cannot be set with any other selector except NamespaceSelector.
+	// +optional
+	ExternalEntitySelector *metav1.LabelSelector `json:"externalEntitySelector,omitempty"`
+	// Group is the name of the ClusterGroup which can be set as an
+	// AppliedTo in place of a stand-alone selector. A Group cannot
+	// be set with any other selector.
+	// +optional
+	Group string `json:"group,omitempty"`
+	// Select all Pods with the ServiceAccount matched by this field, as
+	// workloads in AppliedTo fields.
+	// Cannot be set with any other selector.
+	// +optional
+	ServiceAccount *NamespacedName `json:"serviceAccount,omitempty"`
 	// Select a certain Service which matches the NamespacedName.
 	// A Service can only be set in either policy level AppliedTo field in a policy
 	// that only has ingress rules or rule level AppliedTo field in an ingress rule.
@@ -497,6 +551,13 @@ type NamespaceMatchType string
 
 const (
 	NamespaceMatchSelf NamespaceMatchType = "Self"
+)
+
+type PeerScope string
+
+const (
+	ScopeCluster    PeerScope = "Cluster"
+	ScopeClusterSet PeerScope = "ClusterSet"
 )
 
 // IPBlock describes a particular CIDR (Ex. "192.168.1.1/24") that is allowed
@@ -585,7 +646,7 @@ type ClusterNetworkPolicySpec struct {
 	// Select workloads on which the rules will be applied to. Cannot be set in
 	// conjunction with AppliedTo in each rule.
 	// +optional
-	AppliedTo []NetworkPolicyPeer `json:"appliedTo,omitempty"`
+	AppliedTo []AppliedTo `json:"appliedTo,omitempty"`
 	// Set of ingress rules evaluated based on the order in which they are set.
 	// Currently Ingress rule supports setting the `From` field but not the `To`
 	// field within a Rule.
@@ -648,6 +709,14 @@ type NamespacedName struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// PeerService refers to a Service, which can be a in-cluster Service or
+// imported multi-cluster service.
+type PeerService struct {
+	Name      string    `json:"name,omitempty"`
+	Namespace string    `json:"namespace,omitempty"`
+	Scope     PeerScope `json:"scope,omitempty"`
+}
+
 // NetworkPolicyProtocol defines additional protocols that are not supported by
 // `ports`. All fields should be used as a standalone field.
 type NetworkPolicyProtocol struct {
@@ -708,4 +777,146 @@ type ExternalNodeList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 
 	Items []ExternalNode `json:"items,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type SupportBundleCollectionList struct {
+	metav1.TypeMeta `json:",inline"`
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	Items []SupportBundleCollection `json:"items"`
+}
+
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type SupportBundleCollection struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard metadata of the object.
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// Specification of the desired behavior of SupportBundleCollection.
+	Spec SupportBundleCollectionSpec `json:"spec"`
+	// Most recently observed status of the SupportBundleCollection.
+	Status SupportBundleCollectionStatus `json:"status"`
+}
+
+type SupportBundleCollectionSpec struct {
+	Nodes         *BundleNodes         `json:"nodes,omitempty"`
+	ExternalNodes *BundleExternalNodes `json:"externalNodes,omitempty"`
+	// ExpirationMinutes is the requested duration of validity of the SupportBundleCollection.
+	// A SupportBundleCollection will be marked as Failed if it does not finish before expiration.
+	// Default is 60.
+	ExpirationMinutes int32 `json:"expirationMinutes"`
+	// SinceTime specifies a relative time before the current time from which to collect logs
+	// A valid value is like: 1d, 2h, 30m.
+	SinceTime      string                        `json:"sinceTime,omitempty"`
+	FileServer     BundleFileServer              `json:"fileServer"`
+	Authentication BundleServerAuthConfiguration `json:"authentication"`
+}
+
+type SupportBundleCollectionStatus struct {
+	// The number of Nodes and ExternalNodes that have completed the SupportBundleCollection.
+	CollectedNodes int32 `json:"collectedNodes"`
+	// The total number of Nodes and ExternalNodes that should process the SupportBundleCollection.
+	DesiredNodes int32 `json:"desiredNodes"`
+	// Represents the latest available observations of a SupportBundleCollection current state.
+	Conditions []SupportBundleCollectionCondition `json:"conditions"`
+}
+
+type SupportBundleCollectionConditionType string
+
+const (
+	// CollectionStarted is added in a SupportBundleCollection when Antrea Controller has started to handle the request.
+	CollectionStarted SupportBundleCollectionConditionType = "Started"
+	// CollectionCompleted is added in a SupportBundleCollection when Antrea has finished processing the collection.
+	CollectionCompleted SupportBundleCollectionConditionType = "Completed"
+	// CollectionFailure is added in a SupportBundleCollection when one of its required Nodes/ExternalNodes fails
+	// to process the request.
+	CollectionFailure SupportBundleCollectionConditionType = "CollectionFailure"
+	// BundleCollected is added in a SupportBundleCollection when at least one of its required Nodes/ExternalNodes
+	// successfully uploaded files to the file server.
+	BundleCollected SupportBundleCollectionConditionType = "BundleCollected"
+)
+
+// SupportBundleCollectionCondition describes the state of a SupportBundleCollection at a certain point.
+type SupportBundleCollectionCondition struct {
+	// Type of StatefulSet condition.
+	Type SupportBundleCollectionConditionType `json:"type"`
+	// Status of the condition, one of True, False, Unknown.
+	Status metav1.ConditionStatus `json:"status"`
+	// Last time the condition transitioned from one status to another.
+	// +optional
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+	// The reason for the condition's last transition.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// A human-readable message indicating details about the transition.
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+type BundleNodes struct {
+	// List the names of certain Nodes which are expected to collect and upload
+	// bundle files.
+	// +optional
+	NodeNames []string `json:"nodeNames,omitempty"`
+	// Select certain Nodes which match the label selector.
+	// +optional
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+}
+
+type BundleExternalNodes struct {
+	Namespace string `json:"namespace"`
+	// List the names of certain ExternalNodes which are expected to collect and upload
+	// bundle files.
+	// +optional
+	NodeNames []string `json:"nodeNames,omitempty"`
+	// Select certain ExternalNodes which match the label selector.
+	// +optional
+	NodeSelector *metav1.LabelSelector `json:"nodeSelector,omitempty"`
+}
+
+// BundleFileServer specifies the bundle file server information.
+type BundleFileServer struct {
+	// The URL of the bundle file server. It is set with format: scheme://host[:port][/path],
+	// e.g, https://api.example.com:8443/v1/supportbundles/. If scheme is not set, https is used by default.
+	URL string `json:"url"`
+}
+
+// BundleServerAuthType defines the authentication type to access the BundleFileServer.
+type BundleServerAuthType string
+
+const (
+	APIKey              BundleServerAuthType = "APIKey"
+	BearerToken         BundleServerAuthType = "BearerToken"
+	BasicAuthentication BundleServerAuthType = "BasicAuthentication"
+)
+
+// BundleServerAuthConfiguration defines the authentication parameters that Antrea uses to access
+// the BundleFileServer.
+type BundleServerAuthConfiguration struct {
+	AuthType BundleServerAuthType `json:"authType"`
+	// AuthSecret is a Secret reference which stores the authentication value.
+	AuthSecret *v1.SecretReference `json:"authSecret"`
+}
+
+type L7Protocol struct {
+	HTTP *HTTPProtocol `json:"http,omitempty"`
+}
+
+// HTTPProtocol matches HTTP requests with specific host, method, and path. All fields could be used alone or together.
+// If all fields are not provided, it matches all HTTP requests.
+type HTTPProtocol struct {
+	// Host represents the hostname present in the URI or the HTTP Host header to match.
+	// It does not contain the port associated with the host.
+	Host string `json:"host,omitempty"`
+	// Method represents the HTTP method to match.
+	// It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+	Method string `json:"method,omitempty"`
+	// Path represents the URI path to match (Ex. "/index.html", "/admin").
+	Path string `json:"path,omitempty"`
 }

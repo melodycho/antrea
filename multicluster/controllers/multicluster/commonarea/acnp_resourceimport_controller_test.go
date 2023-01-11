@@ -46,6 +46,10 @@ var (
 		Namespace: leaderNamespace,
 		Name:      "default-acnp-no-matching-tier",
 	}}
+	acnpImpNoSpecReq = ctrl.Request{NamespacedName: types.NamespacedName{
+		Namespace: leaderNamespace,
+		Name:      "default-acnp-no-spec",
+	}}
 
 	allowAction     = v1alpha1.RuleActionAllow
 	dropAction      = v1alpha1.RuleActionDrop
@@ -69,7 +73,7 @@ var (
 			ClusterNetworkPolicy: &v1alpha1.ClusterNetworkPolicySpec{
 				Tier:     "securityops",
 				Priority: 1.0,
-				AppliedTo: []v1alpha1.NetworkPolicyPeer{
+				AppliedTo: []v1alpha1.AppliedTo{
 					{NamespaceSelector: &metav1.LabelSelector{}},
 				},
 				Ingress: []v1alpha1.Rule{
@@ -87,6 +91,16 @@ var (
 			},
 		},
 	}
+	acnpResImportNoSpec = &mcsv1alpha1.ResourceImport{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: leaderNamespace,
+			Name:      "default-acnp-no-spec",
+		},
+		Spec: mcsv1alpha1.ResourceImportSpec{
+			Name: "default-acnp-no-spec",
+			Kind: common.AntreaClusterNetworkPolicyKind,
+		},
+	}
 	acnpResImportNoMatchingTier = &mcsv1alpha1.ResourceImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: leaderNamespace,
@@ -98,7 +112,7 @@ var (
 			ClusterNetworkPolicy: &v1alpha1.ClusterNetworkPolicySpec{
 				Tier:     "somerandomtier",
 				Priority: 1.0,
-				AppliedTo: []v1alpha1.NetworkPolicyPeer{
+				AppliedTo: []v1alpha1.AppliedTo{
 					{NamespaceSelector: &metav1.LabelSelector{}},
 				},
 			},
@@ -108,8 +122,8 @@ var (
 
 func TestResourceImportReconciler_handleCopySpanACNPCreateEvent(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(securityOpsTier).Build()
-	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(acnpResImport, acnpResImportNoMatchingTier).Build()
-	remoteCluster := NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default")
+	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(acnpResImport, acnpResImportNoMatchingTier, acnpResImportNoSpec).Build()
+	remoteCluster := NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default", nil)
 
 	tests := []struct {
 		name            string
@@ -127,6 +141,12 @@ func TestResourceImportReconciler_handleCopySpanACNPCreateEvent(t *testing.T) {
 			name:            "import ACNP of non-existing tier",
 			acnpImportName:  "acnp-no-matching-tier",
 			req:             acnpImpNoMatchingTierReq,
+			expectedSuccess: false,
+		},
+		{
+			name:            "import ACNP of empty spec",
+			acnpImportName:  "acnp-no-spec",
+			req:             acnpImpNoSpecReq,
 			expectedSuccess: false,
 		},
 	}
@@ -168,7 +188,7 @@ func TestResourceImportReconciler_handleCopySpanACNPDeleteEvent(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingACNP).Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	remoteCluster := NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default")
+	remoteCluster := NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default", nil)
 
 	r := NewResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", remoteCluster)
 	r.installedResImports.Add(*acnpResImport)
@@ -179,6 +199,9 @@ func TestResourceImportReconciler_handleCopySpanACNPDeleteEvent(t *testing.T) {
 	acnp := &v1alpha1.ClusterNetworkPolicy{}
 	if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: "", Name: common.AntreaMCSPrefix + acnpImportName}, acnp); !apierrors.IsNotFound(err) {
 		t.Errorf("ResourceImport Reconciler should delete ACNP successfully but got error = %v", err)
+	}
+	if _, exists, _ := r.installedResImports.Get(*acnpResImport); exists {
+		t.Errorf("Reconciler should delete ResImport from installedResImports after successful resource deletion")
 	}
 }
 
@@ -191,7 +214,7 @@ func TestResourceImportReconciler_handleCopySpanACNPUpdateEvent(t *testing.T) {
 		Spec: v1alpha1.ClusterNetworkPolicySpec{
 			Tier:     "securityops",
 			Priority: 1.0,
-			AppliedTo: []v1alpha1.NetworkPolicyPeer{
+			AppliedTo: []v1alpha1.AppliedTo{
 				{NamespaceSelector: &metav1.LabelSelector{}},
 			},
 			Ingress: []v1alpha1.Rule{
@@ -219,7 +242,7 @@ func TestResourceImportReconciler_handleCopySpanACNPUpdateEvent(t *testing.T) {
 			ClusterNetworkPolicy: &v1alpha1.ClusterNetworkPolicySpec{
 				Tier:     "securityops",
 				Priority: 1.0,
-				AppliedTo: []v1alpha1.NetworkPolicyPeer{
+				AppliedTo: []v1alpha1.AppliedTo{
 					{NamespaceSelector: &metav1.LabelSelector{}},
 				},
 			},
@@ -233,7 +256,7 @@ func TestResourceImportReconciler_handleCopySpanACNPUpdateEvent(t *testing.T) {
 		Spec: v1alpha1.ClusterNetworkPolicySpec{
 			Tier:     "securityops",
 			Priority: 1.0,
-			AppliedTo: []v1alpha1.NetworkPolicyPeer{
+			AppliedTo: []v1alpha1.AppliedTo{
 				{NamespaceSelector: &metav1.LabelSelector{}},
 			},
 		},
@@ -249,7 +272,7 @@ func TestResourceImportReconciler_handleCopySpanACNPUpdateEvent(t *testing.T) {
 			ClusterNetworkPolicy: &v1alpha1.ClusterNetworkPolicySpec{
 				Tier:     "somerandomtier",
 				Priority: 1.0,
-				AppliedTo: []v1alpha1.NetworkPolicyPeer{
+				AppliedTo: []v1alpha1.AppliedTo{
 					{NamespaceSelector: &metav1.LabelSelector{}},
 				},
 			},
@@ -270,7 +293,7 @@ func TestResourceImportReconciler_handleCopySpanACNPUpdateEvent(t *testing.T) {
 		Spec: v1alpha1.ClusterNetworkPolicySpec{
 			Tier:     "securityops",
 			Priority: 1.0,
-			AppliedTo: []v1alpha1.NetworkPolicyPeer{
+			AppliedTo: []v1alpha1.AppliedTo{
 				{NamespaceSelector: &metav1.LabelSelector{}},
 			},
 		},
@@ -278,7 +301,7 @@ func TestResourceImportReconciler_handleCopySpanACNPUpdateEvent(t *testing.T) {
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingACNP1, existingACNP3, existingACNP4, securityOpsTier).Build()
 	fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(acnpResImport, updatedResImport2, updatedResImport3).Build()
-	remoteCluster := NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default")
+	remoteCluster := NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default", nil)
 
 	r := NewResourceImportReconciler(fakeClient, scheme, fakeClient, localClusterID, "default", remoteCluster)
 	r.installedResImports.Add(*acnpResImport)

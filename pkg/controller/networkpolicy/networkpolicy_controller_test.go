@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -41,6 +42,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	fakemcsversioned "antrea.io/antrea/multicluster/pkg/client/clientset/versioned/fake"
+	mcsinformers "antrea.io/antrea/multicluster/pkg/client/informers/externalversions"
 	"antrea.io/antrea/pkg/apis/controlplane"
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha2"
@@ -49,8 +52,10 @@ import (
 	fakeversioned "antrea.io/antrea/pkg/client/clientset/versioned/fake"
 	crdinformers "antrea.io/antrea/pkg/client/informers/externalversions"
 	"antrea.io/antrea/pkg/controller/grouping"
+	"antrea.io/antrea/pkg/controller/labelidentity"
 	"antrea.io/antrea/pkg/controller/networkpolicy/store"
 	antreatypes "antrea.io/antrea/pkg/controller/types"
+	"antrea.io/antrea/pkg/util/externalnode"
 )
 
 var alwaysReady = func() bool { return true }
@@ -91,14 +96,17 @@ type networkPolicyController struct {
 	informerFactory            informers.SharedInformerFactory
 	crdInformerFactory         crdinformers.SharedInformerFactory
 	groupingController         *grouping.GroupEntityController
+	labelIdentityController    *labelidentity.Controller
 }
 
 // objects is an initial set of K8s objects that is exposed through the client.
 func newController(objects ...runtime.Object) (*fake.Clientset, *networkPolicyController) {
 	client := newClientset(objects...)
 	crdClient := fakeversioned.NewSimpleClientset()
+	mcsClient := fakemcsversioned.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, informerDefaultResync)
 	crdInformerFactory := crdinformers.NewSharedInformerFactory(crdClient, informerDefaultResync)
+	mcsInformerFactory := mcsinformers.NewSharedInformerFactory(mcsClient, informerDefaultResync)
 	appliedToGroupStore := store.NewAppliedToGroupStore()
 	addressGroupStore := store.NewAddressGroupStore()
 	internalNetworkPolicyStore := store.NewNetworkPolicyStore()
@@ -110,9 +118,14 @@ func newController(objects ...runtime.Object) (*fake.Clientset, *networkPolicyCo
 		informerFactory.Core().V1().Pods(),
 		informerFactory.Core().V1().Namespaces(),
 		crdInformerFactory.Crd().V1alpha2().ExternalEntities())
+	labelIndex := labelidentity.NewLabelIdentityIndex()
+	labelIdentityController := labelidentity.NewLabelIdentityController(
+		labelIndex,
+		mcsInformerFactory.Multicluster().V1alpha1().LabelIdentities())
 	npController := NewNetworkPolicyController(client,
 		crdClient,
 		groupEntityIndex,
+		labelIndex,
 		informerFactory.Core().V1().Namespaces(),
 		informerFactory.Core().V1().Services(),
 		informerFactory.Networking().V1().NetworkPolicies(),
@@ -125,7 +138,8 @@ func newController(objects ...runtime.Object) (*fake.Clientset, *networkPolicyCo
 		addressGroupStore,
 		appliedToGroupStore,
 		internalNetworkPolicyStore,
-		internalGroupStore)
+		internalGroupStore,
+		true)
 	npController.namespaceLister = informerFactory.Core().V1().Namespaces().Lister()
 	npController.namespaceListerSynced = alwaysReady
 	npController.networkPolicyListerSynced = alwaysReady
@@ -153,6 +167,7 @@ func newController(objects ...runtime.Object) (*fake.Clientset, *networkPolicyCo
 		informerFactory,
 		crdInformerFactory,
 		groupingController,
+		labelIdentityController,
 	}
 }
 
@@ -222,6 +237,7 @@ func newControllerWithoutEventHandler(k8sObjects, crdObjects []runtime.Object) (
 		internalNetworkPolicyStore,
 		informerFactory,
 		crdInformerFactory,
+		nil,
 		nil,
 	}
 }
@@ -2911,7 +2927,7 @@ func TestSyncInternalNetworkPolicy(t *testing.T) {
 	inputPolicy := &crdv1alpha1.ClusterNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Name: "cnpA", UID: "uidA"},
 		Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-			AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+			AppliedTo: []crdv1alpha1.AppliedTo{
 				{PodSelector: &selectorA},
 				{PodSelector: &selectorB},
 			},
@@ -3169,7 +3185,7 @@ func TestSyncInternalNetworkPolicyWithGroups(t *testing.T) {
 			inputPolicy: &crdv1alpha1.NetworkPolicy{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "nsA", Name: "anpA", UID: "uidA"},
 				Spec: crdv1alpha1.NetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{Group: "groupA"},
 					},
 					Priority: p10,
@@ -3218,7 +3234,7 @@ func TestSyncInternalNetworkPolicyWithGroups(t *testing.T) {
 			inputPolicy: &crdv1alpha1.NetworkPolicy{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "nsA", Name: "anpA", UID: "uidA"},
 				Spec: crdv1alpha1.NetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{Group: "parentGroup"},
 					},
 					Priority: p10,
@@ -3263,7 +3279,7 @@ func TestSyncInternalNetworkPolicyWithGroups(t *testing.T) {
 			inputPolicy: &crdv1alpha1.NetworkPolicy{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "nsA", Name: "anpA", UID: "uidA"},
 				Spec: crdv1alpha1.NetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{Group: "groupA"},
 					},
 					Priority: p10,
@@ -3312,7 +3328,7 @@ func TestSyncInternalNetworkPolicyWithGroups(t *testing.T) {
 			inputPolicy: &crdv1alpha1.NetworkPolicy{
 				ObjectMeta: metav1.ObjectMeta{Namespace: "nsA", Name: "anpA", UID: "uidA"},
 				Spec: crdv1alpha1.NetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{Group: "parentGroup"},
 					},
 					Priority: p10,
@@ -3375,6 +3391,107 @@ func TestSyncInternalNetworkPolicyWithGroups(t *testing.T) {
 				return reflect.DeepEqual(tt.expectedPolicy, gotPolicy), nil
 			})
 			assert.NoError(t, err, "Expected %#v\ngot %#v", tt.expectedPolicy, gotPolicy)
+		})
+	}
+}
+
+func TestSyncAppliedToGroupWithExternalEntity(t *testing.T) {
+	selectorSpec := metav1.LabelSelector{
+		MatchLabels: map[string]string{"group": "appliedTo"},
+	}
+	tests := []struct {
+		name                string
+		addedExternalEntity *v1alpha2.ExternalEntity
+		entityNodeKey       string
+		addedInSpan         bool
+	}{
+		{
+			name: "match-external-entity-created-by-external-node",
+			addedExternalEntity: &v1alpha2.ExternalEntity{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "entityA",
+					Namespace: "nsA",
+					Labels:    map[string]string{"group": "appliedTo"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "crd.antrea.io/v1alpha1",
+							Kind:       externalnode.EntityOwnerKind,
+							Name:       "nodeA",
+						},
+					},
+				},
+				Spec: v1alpha2.ExternalEntitySpec{
+					ExternalNode: "nodeA",
+				},
+			},
+			entityNodeKey: "nsA/nodeA",
+			addedInSpan:   true,
+		},
+		{
+			name: "match-external-entity-created-by-other-modules",
+			addedExternalEntity: &v1alpha2.ExternalEntity{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "entityB",
+					Namespace: "nsA",
+					Labels:    map[string]string{"group": "appliedTo"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "crd.antrea.io/v1alpha1",
+							Kind:       "external-modules",
+							Name:       "nodeB",
+						},
+					},
+				},
+				Spec: v1alpha2.ExternalEntitySpec{
+					ExternalNode: "nodeB",
+				},
+			},
+			entityNodeKey: "nodeB",
+			addedInSpan:   true,
+		},
+		{
+			name: "match-external-entity-not-set-external-node",
+			addedExternalEntity: &v1alpha2.ExternalEntity{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "entityA",
+					Namespace: "nsA",
+					Labels:    map[string]string{"group": "appliedTo"},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "crd.antrea.io/v1alpha1",
+							Kind:       "external-modules",
+							Name:       "nodeB",
+						},
+					},
+				},
+				Spec: v1alpha2.ExternalEntitySpec{},
+			},
+			entityNodeKey: "nodeB",
+			addedInSpan:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, npc := newController()
+			npc.groupingInterface.AddExternalEntity(tt.addedExternalEntity)
+			groupSelector := antreatypes.NewGroupSelector("nsA", nil, nil, &selectorSpec, nil)
+			appGroupID := getNormalizedUID(groupSelector.NormalizedName)
+			appliedToGroup := &antreatypes.AppliedToGroup{
+				Name:     appGroupID,
+				UID:      types.UID(appGroupID),
+				Selector: groupSelector,
+			}
+			npc.appliedToGroupStore.Create(appliedToGroup)
+			npc.groupingInterface.AddGroup(appliedToGroupType, appliedToGroup.Name, appliedToGroup.Selector)
+			npc.syncAppliedToGroup(appGroupID)
+			appGroupObj, _, _ := npc.appliedToGroupStore.Get(appGroupID)
+			appGroup := appGroupObj.(*antreatypes.AppliedToGroup)
+			entitiesAdded := appGroup.GroupMemberByNode[tt.entityNodeKey]
+			if tt.addedInSpan {
+				assert.Equal(t, 1, len(entitiesAdded), "expected Entity Node to add into AppliedToGroup span")
+			} else {
+				assert.Equal(t, 0, len(entitiesAdded), "expected Entity Node not to add into AppliedToGroup span")
+			}
 		})
 	}
 }

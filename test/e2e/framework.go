@@ -728,21 +728,6 @@ func (data *TestData) deployAntrea(option deployAntreaOptions) error {
 	return data.deployAntreaCommon(option.DeployYML(), "", true)
 }
 
-// enableAntreaFlowExporter redeploys Antrea with flow exporter config params enabled.
-func (data *TestData) enableAntreaFlowExporter(ipfixCollector string) error {
-	// Enable flow exporter feature and add related config params to antrea agent configmap.
-	ac := func(config *agentconfig.AgentConfig) {
-		config.FeatureGates["FlowExporter"] = true
-		config.FlowPollInterval = exporterFlowPollInterval.String()
-		config.ActiveFlowExportTimeout = exporterActiveFlowExportTimeout.String()
-		config.IdleFlowExportTimeout = exporterIdleFlowExportTimeout.String()
-		if ipfixCollector != "" {
-			config.FlowCollectorAddr = ipfixCollector
-		}
-	}
-	return data.mutateAntreaConfigMap(nil, ac, false, true)
-}
-
 // deployFlowVisibilityClickHouse deploys ClickHouse operator and DB.
 func (data *TestData) deployFlowVisibilityClickHouse() (string, error) {
 	err := data.CreateNamespace(flowVisibilityNamespace, nil)
@@ -1145,6 +1130,8 @@ type PodBuilder struct {
 	Labels             map[string]string
 	NodeName           string
 	MutateFunc         func(*corev1.Pod)
+	ResourceRequests   corev1.ResourceList
+	ResourceLimits     corev1.ResourceList
 }
 
 func NewPodBuilder(name, ns, image string) *PodBuilder {
@@ -1219,6 +1206,12 @@ func (b *PodBuilder) WithMutateFunc(f func(*corev1.Pod)) *PodBuilder {
 	return b
 }
 
+func (b *PodBuilder) WithResources(ResourceRequests, ResourceLimits corev1.ResourceList) *PodBuilder {
+	b.ResourceRequests = ResourceRequests
+	b.ResourceLimits = ResourceLimits
+	return b
+}
+
 func (b *PodBuilder) Create(data *TestData) error {
 	containerName := b.ContainerName
 	if containerName == "" {
@@ -1234,6 +1227,10 @@ func (b *PodBuilder) Create(data *TestData) error {
 				Args:            b.Args,
 				Env:             b.Env,
 				Ports:           b.Ports,
+				Resources: corev1.ResourceRequirements{
+					Requests: b.ResourceRequests,
+					Limits:   b.ResourceLimits,
+				},
 				SecurityContext: &corev1.SecurityContext{
 					Privileged: &b.IsPrivileged,
 				},
@@ -1274,6 +1271,20 @@ func (b *PodBuilder) Create(data *TestData) error {
 	}
 	if _, err := data.clientset.CoreV1().Pods(b.Namespace).Create(context.TODO(), pod, metav1.CreateOptions{}); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (data *TestData) UpdatePod(namespace, name string, mutateFunc func(*corev1.Pod)) error {
+	pod, err := data.clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("error when getting '%s/%s' Pod: %v", namespace, name, err)
+	}
+	if mutateFunc != nil {
+		mutateFunc(pod)
+	}
+	if _, err := data.clientset.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("error when updating '%s/%s' Pod: %v", namespace, name, err)
 	}
 	return nil
 }

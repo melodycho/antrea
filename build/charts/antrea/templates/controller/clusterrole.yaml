@@ -290,3 +290,25 @@ rules:
       - get
       - list
       - watch
+  - apiGroups:
+      - crd.antrea.io
+    resources:
+      - supportbundlecollections
+    verbs:
+      - get
+      - watch
+      - list
+  - apiGroups:
+      - crd.antrea.io
+    resources:
+      - supportbundlecollections/status
+    verbs:
+      - update
+  - apiGroups:
+      - multicluster.crd.antrea.io
+    resources:
+      - labelidentities
+    verbs:
+      - get
+      - list
+      - watch

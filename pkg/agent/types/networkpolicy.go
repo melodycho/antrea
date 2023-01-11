@@ -56,6 +56,7 @@ const (
 	ICMPAddr
 	ServiceGroupIDAddr
 	IGMPAddr
+	LabelIDAddr
 	UnSupported
 )
 
@@ -78,6 +79,8 @@ type PolicyRule struct {
 	From          []Address
 	To            []Address
 	Service       []v1beta2.Service
+	L7Protocols   []v1beta2.L7Protocol
+	L7RuleVlanID  *uint32
 	Action        *secv1alpha1.RuleAction
 	Priority      *uint16
 	Name          string

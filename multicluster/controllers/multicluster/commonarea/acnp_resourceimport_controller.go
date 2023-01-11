@@ -43,9 +43,13 @@ var (
 )
 
 func (r *ResourceImportReconciler) handleResImpUpdateForClusterNetworkPolicy(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
+	if resImp.Spec.ClusterNetworkPolicy == nil {
+		klog.V(2).InfoS("Skip reconciling ResourceImport for ClusterNetworkPolicy since it has no valid spec", "resourceimport", klog.KObj(resImp))
+		return ctrl.Result{}, nil
+	}
 	acnpName := types.NamespacedName{
 		Namespace: "",
-		Name:      common.AntreaMCSPrefix + resImp.Spec.Name,
+		Name:      common.ToMCResourceName(resImp.Spec.Name),
 	}
 	klog.InfoS("Updating ACNP corresponding to ResourceImport",
 		"acnp", acnpName.String(), "resourceimport", klog.KObj(resImp))
@@ -107,7 +111,7 @@ func (r *ResourceImportReconciler) handleResImpUpdateForClusterNetworkPolicy(ctx
 }
 
 func (r *ResourceImportReconciler) handleResImpDeleteForClusterNetworkPolicy(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
-	acnpName := common.AntreaMCSPrefix + resImp.Spec.Name
+	acnpName := common.ToMCResourceName(resImp.Spec.Name)
 	klog.InfoS("Deleting ACNP corresponding to ResourceImport",
 		"acnp", acnpName, "resourceimport", klog.KObj(resImp))
 
@@ -116,16 +120,19 @@ func (r *ResourceImportReconciler) handleResImpDeleteForClusterNetworkPolicy(ctx
 			Name: acnpName,
 		},
 	}
-	if err := r.localClusterClient.Delete(ctx, acnp, &client.DeleteOptions{}); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+	err := client.IgnoreNotFound(r.localClusterClient.Delete(ctx, acnp, &client.DeleteOptions{}))
+	if err != nil {
+		klog.ErrorS(err, "Failed to delete imported ACNP", "acnp", acnpName)
+		return ctrl.Result{}, err
 	}
+	r.installedResImports.Delete(*resImp)
 	return ctrl.Result{}, nil
 }
 
 func getMCAntreaClusterPolicy(resImp *multiclusterv1alpha1.ResourceImport) *v1alpha1.ClusterNetworkPolicy {
 	return &v1alpha1.ClusterNetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: common.AntreaMCSPrefix + resImp.Spec.Name,
+			Name: common.ToMCResourceName(resImp.Spec.Name),
 			Annotations: map[string]string{
 				common.AntreaMCACNPAnnotation: "true",
 			},

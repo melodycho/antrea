@@ -15,7 +15,6 @@
 package openflow
 
 import (
-	"fmt"
 	"net"
 	"sync"
 
@@ -73,8 +72,19 @@ func multicastPipelineClassifyFlow(cookieID uint64, pipeline binding.Pipeline) b
 }
 
 func (f *featureMulticast) initFlows() []binding.Flow {
-	cookieID := f.cookieAllocator.Request(f.category).Raw()
-	return f.multicastOutputFlows(cookieID)
+	// Install flows to send the IGMP report messages to Antrea Agent.
+	flows := f.igmpPktInFlows(uint8(PacketInReasonMC))
+	// Install flow to forward the IGMP query messages to all local Pods.
+	flows = append(flows, f.externalMulticastReceiverFlow())
+	// Install flows to forward the multicast traffic to antrea-gw0 if no local Pods have joined in the group, and this
+	// is to ensure local Pods can access the external multicast receivers.
+	flows = append(flows, f.multicastSkipIGMPMetricFlows()...)
+	if f.enableAntreaPolicy {
+		flows = append(flows, f.igmpEgressFlow())
+	}
+	// Install flows to output multicast packets.
+	flows = append(flows, f.multicastOutputFlows()...)
+	return flows
 }
 
 func (f *featureMulticast) replayFlows() []binding.Flow {
@@ -82,7 +92,7 @@ func (f *featureMulticast) replayFlows() []binding.Flow {
 	return getCachedFlows(f.cachedFlows)
 }
 
-func (f *featureMulticast) multicastReceiversGroup(groupID binding.GroupIDType, tableID uint8, ports []uint32, remoteIPs []net.IP) error {
+func (f *featureMulticast) multicastReceiversGroup(groupID binding.GroupIDType, tableID uint8, ports []uint32, remoteIPs []net.IP) binding.Group {
 	group := f.bridge.CreateGroupTypeAll(groupID).ResetBuckets()
 	for i := range ports {
 		group = group.Bucket().
@@ -99,14 +109,11 @@ func (f *featureMulticast) multicastReceiversGroup(groupID binding.GroupIDType, 
 			ResubmitToTable(MulticastOutputTable.GetID()).
 			Done()
 	}
-	if err := group.Add(); err != nil {
-		return fmt.Errorf("error when installing Multicast receiver Group: %w", err)
-	}
-	f.groupCache.Store(groupID, group)
-	return nil
+	return group
 }
 
-func (f *featureMulticast) multicastOutputFlows(cookieID uint64) []binding.Flow {
+func (f *featureMulticast) multicastOutputFlows() []binding.Flow {
+	cookieID := f.cookieAllocator.Request(f.category).Raw()
 	flows := []binding.Flow{
 		MulticastOutputTable.ofTable.BuildFlow(priorityNormal).
 			Cookie(cookieID).
@@ -176,14 +183,16 @@ func (f *featureMulticast) multicastPodMetricFlows(podIP net.IP, podOFPort uint3
 }
 
 func (f *featureMulticast) replayGroups() {
+	var groups []binding.OFEntry
 	f.groupCache.Range(func(id, value interface{}) bool {
 		group := value.(binding.Group)
 		group.Reset()
-		if err := group.Add(); err != nil {
-			klog.ErrorS(err, "Error when replaying cached group", "group", id)
-		}
+		groups = append(groups, group)
 		return true
 	})
+	if err := f.bridge.AddOFEntriesInBundle(groups, nil, nil); err != nil {
+		klog.ErrorS(err, "error when replaying cached groups for Multicast")
+	}
 }
 
 func (f *featureMulticast) multicastRemoteReportFlows(groupID binding.GroupIDType, firstMulticastTable binding.Table) []binding.Flow {

@@ -8,11 +8,11 @@ jobs:
   upload-release-assets:
     runs-on: ubuntu-latest
     steps:
-    - name: Set up Go 1.17
+    - uses: actions/checkout@v3
+    - name: Set up Go using version from go.mod
       uses: actions/setup-go@v3
       with:
-        go-version: 1.17
-    - uses: actions/checkout@v3
+        go-version-file: 'go.mod'
     - name: Build assets
       env:
         TAG: ${{ github.ref }}
@@ -182,6 +182,15 @@ jobs:
         asset_path: ./assets/antrea-windows.yml
         asset_name: antrea-windows.yml
         asset_content_type: application/octet-stream
+    - name: Upload antrea-windows-containerd.yml
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./assets/antrea-windows-containerd.yml
+        asset_name: antrea-windows-containerd.yml
+        asset_content_type: application/octet-stream
     - name: Upload flow-aggregator.yml
       uses: actions/upload-release-asset@v1
       env:
@@ -218,13 +227,40 @@ jobs:
         asset_path: ./assets/antrea-multicluster-member.yml
         asset_name: antrea-multicluster-member.yml
         asset_content_type: application/octet-stream
+    - name: Upload antrea-agent-linux-x86_64
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./assets/antrea-agent-linux-x86_64
+        asset_name: antrea-agent-linux-x86_64
+        asset_content_type: application/octet-stream
+    - name: Upload antrea-agent-linux-arm64
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./assets/antrea-agent-linux-arm64
+        asset_name: antrea-agent-linux-arm64
+        asset_content_type: application/octet-stream
+    - name: Upload antrea-agent-linux-arm
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./assets/antrea-agent-linux-arm
+        asset_name: antrea-agent-linux-arm
+        asset_content_type: application/octet-stream
     - name: Upload antrea-agent-windows-x86_64.exe
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./assets/antrea-agent.exe
+        asset_path: ./assets/antrea-agent-windows-x86_64.exe
         asset_name: antrea-agent-windows-x86_64.exe
         asset_content_type: application/octet-stream
     - name: Upload antrea-cni-windows-x86_64.exe
@@ -233,7 +269,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./assets/antrea-cni.exe
+        asset_path: ./assets/antrea-cni-windows-x86_64.exe
         asset_name: antrea-cni-windows-x86_64.exe
         asset_content_type: application/octet-stream
     - name: Upload Start-AntreaAgent.ps1
@@ -262,6 +298,24 @@ jobs:
         upload_url: ${{ github.event.release.upload_url }}
         asset_path: ./assets/flow-aggregator-chart.tgz
         asset_name: flow-aggregator-chart.tgz
+        asset_content_type: application/octet-stream
+    - name: Upload install-vm.sh
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./assets/install-vm.sh
+        asset_name: install-vm.sh
+        asset_content_type: application/octet-stream
+    - name: Upload install-vm.ps1
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./assets/install-vm.ps1
+        asset_name: install-vm.ps1
         asset_content_type: application/octet-stream
 
   update-website:

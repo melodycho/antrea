@@ -129,53 +129,32 @@ type remoteCommonArea struct {
 
 	// managerStopFunc to stop the manager when the RemoteCommonArea is stopped.
 	managerStopFunc context.CancelFunc
+
+	// Enable StretchedNetworkPolicy which will export and import labelIdentities in the
+	// ClusterSet and allow Antrea-native policies to select peers from other clusters
+	// in a ClusterSet.
+	enableStretchedNetworkPolicy bool
 }
 
 // NewRemoteCommonArea returns a RemoteCommonArea instance which will use access credentials from the Secret to
 // connect to the leader cluster's CommonArea.
-func NewRemoteCommonArea(clusterID common.ClusterID, clusterSetID common.ClusterSetID, localClusterID common.ClusterSetID, url string, secret *v1.Secret,
-	scheme *runtime.Scheme, localClusterClient client.Client, clusterSetNamespace string, localNamespace string) (RemoteCommonArea, error) {
+func NewRemoteCommonArea(clusterID common.ClusterID, clusterSetID common.ClusterSetID, localClusterID common.ClusterSetID, mgr manager.Manager, remoteClient client.Client,
+	scheme *runtime.Scheme, localClusterClient client.Client, clusterSetNamespace string, localNamespace string, config *rest.Config, enableStretchedNetworkPolicy bool) (RemoteCommonArea, error) {
 	klog.InfoS("Create a RemoteCommonArea", "cluster", clusterID)
 
-	crtData, token, err := GetSecretCACrtAndToken(secret)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create manager for the RemoteCommonArea
-	klog.InfoS("Connecting to RemoteCommonArea", "cluster", clusterID, "url", url)
-	config, err := clientcmd.BuildConfigFromFlags(url, "")
-	if err != nil {
-		return nil, err
-	}
-	config.BearerToken = string(token)
-	config.CAData = crtData
-	mgr, err := ctrl.NewManager(config, ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: "0",
-		Namespace:          clusterSetNamespace,
-	})
-	if err != nil {
-		klog.ErrorS(err, "Error creating manager for RemoteCommonArea", "cluster", clusterID)
-		return nil, err
-	}
-
-	remoteClient, e := client.New(config, client.Options{Scheme: scheme})
-	if e != nil {
-		return nil, e
-	}
 	remote := &remoteCommonArea{
-		Client:             remoteClient,
-		ClusterManager:     mgr,
-		ClusterSetID:       clusterSetID,
-		ClusterID:          clusterID,
-		config:             config,
-		scheme:             scheme,
-		Namespace:          clusterSetNamespace,
-		connected:          false,
-		localClusterClient: localClusterClient,
-		localNamespace:     localNamespace,
-		localClusterID:     localClusterID,
+		Client:                       remoteClient,
+		ClusterManager:               mgr,
+		ClusterSetID:                 clusterSetID,
+		ClusterID:                    clusterID,
+		config:                       config,
+		scheme:                       scheme,
+		Namespace:                    clusterSetNamespace,
+		connected:                    false,
+		localClusterClient:           localClusterClient,
+		localNamespace:               localNamespace,
+		localClusterID:               localClusterID,
+		enableStretchedNetworkPolicy: enableStretchedNetworkPolicy,
 	}
 	remote.clusterStatus.Type = multiclusterv1alpha1.ClusterReady
 	remote.clusterStatus.Status = v1.ConditionUnknown
@@ -189,10 +168,40 @@ func NewRemoteCommonArea(clusterID common.ClusterID, clusterSetID common.Cluster
 	return remote, nil
 }
 
+func GetRemoteConfigAndClient(secretObj *v1.Secret, url string, clusterID common.ClusterID, clusterSet *multiclusterv1alpha1.ClusterSet, scheme *runtime.Scheme) (*rest.Config,
+	manager.Manager, client.Client, error) {
+	crtData, token, err := getSecretCACrtAndToken(secretObj)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	config, err := clientcmd.BuildConfigFromFlags(url, "")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	config.BearerToken = string(token)
+	config.CAData = crtData
+
+	remoteCommonAreaMgr, err := ctrl.NewManager(config, ctrl.Options{
+		Scheme:             scheme,
+		MetricsBindAddress: "0",
+		Namespace:          clusterSet.Spec.Namespace,
+	})
+	if err != nil {
+		klog.ErrorS(err, "Error creating manager for RemoteCommonArea", "cluster", clusterID)
+		return nil, nil, nil, err
+	}
+
+	remoteClient, e := client.New(config, client.Options{Scheme: scheme})
+	if e != nil {
+		return nil, nil, nil, e
+	}
+	return config, remoteCommonAreaMgr, remoteClient, nil
+}
+
 /**
  * GetSecretCACrtAndToken returns the access credentials from Secret.
  */
-func GetSecretCACrtAndToken(secretObj *v1.Secret) ([]byte, []byte, error) {
+func getSecretCACrtAndToken(secretObj *v1.Secret) ([]byte, []byte, error) {
 	caData, found := secretObj.Data[v1.ServiceAccountRootCAKey]
 	if !found {
 		return nil, nil, fmt.Errorf("ca.crt data not found in Secret %v", secretObj.GetName())
@@ -377,14 +386,25 @@ func (r *remoteCommonArea) StartWatching() error {
 		r.ClusterManager.GetClient(),
 		r.ClusterManager.GetScheme(),
 		r.localClusterClient,
-		string(r.GetLocalClusterID()),
+		r.GetLocalClusterID(),
 		r.localNamespace,
 		r,
 	)
-
 	if err := resImportReconciler.SetupWithManager(r.ClusterManager); err != nil {
-		klog.V(2).ErrorS(err, "Error creating ResourceImport controller for RemoteCommonArea", "cluster", r.ClusterID)
 		return fmt.Errorf("error creating ResourceImport controller for RemoteCommonArea: %v", err)
+	}
+	if r.enableStretchedNetworkPolicy {
+		labelIdentityImpReconciler := NewLabelIdentityResourceImportReconciler(
+			r.ClusterManager.GetClient(),
+			r.ClusterManager.GetScheme(),
+			r.localClusterClient,
+			string(r.ClusterID),
+			r.Namespace,
+			r,
+		)
+		if err := labelIdentityImpReconciler.SetupWithManager(r.ClusterManager); err != nil {
+			return fmt.Errorf("error creating LabelIdentityResourceImport controller for RemoteCommonArea: %v", err)
+		}
 	}
 
 	go func() {

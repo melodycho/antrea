@@ -107,6 +107,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 			Priority:        int32(idx),
 			EnableLogging:   ingressRule.EnableLogging,
 			AppliedToGroups: getAppliedToGroupNames(atgs),
+			L7Protocols:     toAntreaL7ProtocolsForCRD(ingressRule.L7Protocols),
 		})
 	}
 	// Compute NetworkPolicyRule for Egress Rule.
@@ -133,6 +134,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 			Priority:        int32(idx),
 			EnableLogging:   egressRule.EnableLogging,
 			AppliedToGroups: getAppliedToGroupNames(atgs),
+			L7Protocols:     toAntreaL7ProtocolsForCRD(egressRule.L7Protocols),
 		})
 	}
 	tierPriority := n.getTierPriority(np.Spec.Tier)
@@ -155,7 +157,7 @@ func (n *NetworkPolicyController) processAntreaNetworkPolicy(np *crdv1alpha1.Net
 	return internalNetworkPolicy, appliedToGroups, addressGroups
 }
 
-func (n *NetworkPolicyController) processAppliedTo(namespace string, appliedTo []crdv1alpha1.NetworkPolicyPeer) []*antreatypes.AppliedToGroup {
+func (n *NetworkPolicyController) processAppliedTo(namespace string, appliedTo []crdv1alpha1.AppliedTo) []*antreatypes.AppliedToGroup {
 	var appliedToGroups []*antreatypes.AppliedToGroup
 	for _, at := range appliedTo {
 		var atg *antreatypes.AppliedToGroup

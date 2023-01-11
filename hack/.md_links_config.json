@@ -29,8 +29,11 @@
         },
         {
             "pattern": "https://avinetworks.com/*"
+        },
+        {
+            "pattern": "https://suricata.io/"
         }
     ],
     "retryOn429": false,
-    "aliveStatusCodes": [200, 206, 429]
+    "aliveStatusCodes": [200, 206, 429, 403, 503]
 }

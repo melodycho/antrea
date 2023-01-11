@@ -74,6 +74,24 @@ message AppliedToGroupPatch {
   repeated GroupMember removedGroupMembers = 3;
 }
 
+message BasicAuthentication {
+  optional string username = 1;
+
+  optional string password = 2;
+}
+
+message BundleFileServer {
+  optional string url = 1;
+}
+
+message BundleServerAuthConfiguration {
+  optional string bearerToken = 1;
+
+  optional string apiKey = 2;
+
+  optional BasicAuthentication basicAuthentication = 3;
+}
+
 // ClusterGroupMembers is a list of GroupMember objects or ipBlocks that are currently selected by a ClusterGroup.
 message ClusterGroupMembers {
   optional k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
@@ -163,6 +181,21 @@ message GroupReference {
   optional string uid = 3;
 }
 
+// HTTPProtocol matches HTTP requests with specific host, method, and path. All fields could be used alone or together.
+// If all fields are not provided, it matches all HTTP requests.
+message HTTPProtocol {
+  // Host represents the hostname present in the URI or the HTTP Host header to match.
+  // It does not contain the port associated with the host.
+  optional string host = 1;
+
+  // Method represents the HTTP method to match.
+  // It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+  optional string method = 2;
+
+  // Path represents the URI path to match (Ex. "/index.html", "/admin").
+  optional string path = 3;
+}
+
 // IPBlock describes a particular CIDR (Ex. "192.168.1.1/24"). The except entry describes CIDRs that should
 // not be included within this rule.
 message IPBlock {
@@ -180,6 +213,11 @@ message IPNet {
   optional bytes ip = 1;
 
   optional int32 prefixLength = 2;
+}
+
+// L7Protocol defines application layer protocol to match.
+message L7Protocol {
+  optional HTTPProtocol http = 1;
 }
 
 // MulticastGroupInfo contains the list of Pods that have joined a multicast group, for a given Node.
@@ -240,6 +278,12 @@ message NetworkPolicyNodeStatus {
 
   // The generation realized by the Node.
   optional int64 generation = 2;
+
+  // The flag to mark the NetworkPolicy realization is failed on the Node or not.
+  optional bool realizationFailure = 3;
+
+  // The error message to describe why the NetworkPolicy realization is failed on the Node.
+  optional string message = 4;
 }
 
 // NetworkPolicyPeer describes a peer of NetworkPolicyRules.
@@ -258,6 +302,10 @@ message NetworkPolicyPeer {
   // A list of ServiceReference.
   // This field can only be possibly set for NetworkPolicyPeer of egress rules.
   repeated ServiceReference toServices = 4;
+
+  // A list of labelIdentities selected as ingress peers for stretched policy.
+  // This field can only be possibly set for NetworkPolicyPeer of ingress rules.
+  repeated uint32 labelIdentities = 5;
 }
 
 message NetworkPolicyReference {
@@ -310,6 +358,9 @@ message NetworkPolicyRule {
   // Name describes the intention of this rule.
   // Name should be unique within the policy.
   optional string name = 9;
+
+  // L7Protocols is a list of application layer protocols which should be matched.
+  repeated L7Protocol l7Protocols = 10;
 }
 
 // NetworkPolicyStats contains the information and traffic stats of a NetworkPolicy.
@@ -409,5 +460,50 @@ message ServiceReference {
 
   // The Namespace of this Service.
   optional string namespace = 2;
+}
+
+// SupportBundleCollection is the message format of antrea/pkg/controller/types.SupportBundleCollection in an API response.
+message SupportBundleCollection {
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.Time expiredAt = 2;
+
+  optional string sinceTime = 3;
+
+  optional BundleFileServer fileServer = 4;
+
+  optional BundleServerAuthConfiguration authentication = 5;
+}
+
+// SupportBundleCollectionList is a list of SupportBundleCollection objects.
+message SupportBundleCollectionList {
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated SupportBundleCollection items = 2;
+}
+
+// SupportBundleCollectionNodeStatus is the status of a SupportBundleCollection on a Node.
+message SupportBundleCollectionNodeStatus {
+  // The name of the Node that produces the status.
+  optional string nodeName = 1;
+
+  // The namespace of the Node that produces the status. It is set only when NodeType is ExternalNode.
+  optional string nodeNamespace = 2;
+
+  // The type of the Node that produces the status. The values include Node and ExternalNode.
+  optional string nodeType = 3;
+
+  // The phase in which a SupportBundleCollection is on the Node.
+  optional bool completed = 4;
+
+  optional string error = 5;
+}
+
+// SupportBundleCollectionStatus is the status of a SupportBundleCollection.
+message SupportBundleCollectionStatus {
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // Nodes contains statuses produced on a list of Nodes.
+  repeated SupportBundleCollectionNodeStatus nodes = 2;
 }
 

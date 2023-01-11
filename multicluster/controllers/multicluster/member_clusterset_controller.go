@@ -49,6 +49,8 @@ type leaderClusterInfo struct {
 	secretName string
 }
 
+var getRemoteConfigAndClient = commonarea.GetRemoteConfigAndClient
+
 // MemberClusterSetReconciler reconciles a ClusterSet object in the member cluster deployment.
 type MemberClusterSetReconciler struct {
 	client.Client
@@ -63,16 +65,20 @@ type MemberClusterSetReconciler struct {
 	installedLeader  leaderClusterInfo
 
 	remoteCommonArea commonarea.RemoteCommonArea
+
+	enableStretchedNetworkPolicy bool
 }
 
 func NewMemberClusterSetReconciler(client client.Client,
 	scheme *runtime.Scheme,
 	namespace string,
+	enableStretchedNetworkPolicy bool,
 ) *MemberClusterSetReconciler {
 	return &MemberClusterSetReconciler{
-		Client:    client,
-		Scheme:    scheme,
-		Namespace: namespace,
+		Client:                       client,
+		Scheme:                       scheme,
+		Namespace:                    namespace,
+		enableStretchedNetworkPolicy: enableStretchedNetworkPolicy,
 	}
 }
 
@@ -207,8 +213,13 @@ func (r *MemberClusterSetReconciler) createOrUpdateRemoteCommonArea(clusterSet *
 		return err
 	}
 
-	r.remoteCommonArea, err = commonarea.NewRemoteCommonArea(clusterID, r.clusterSetID, common.ClusterSetID(r.clusterID), url, secret, r.Scheme,
-		r.Client, clusterSet.Spec.Namespace, r.Namespace)
+	config, remoteCommonAreaMgr, remoteClient, err := getRemoteConfigAndClient(secret, url, clusterID, clusterSet, r.Scheme)
+	if err != nil {
+		return err
+	}
+
+	r.remoteCommonArea, err = commonarea.NewRemoteCommonArea(clusterID, r.clusterSetID, common.ClusterSetID(r.clusterID), remoteCommonAreaMgr, remoteClient, r.Scheme,
+		r.Client, clusterSet.Spec.Namespace, r.Namespace, config, r.enableStretchedNetworkPolicy)
 	if err != nil {
 		klog.ErrorS(err, "Unable to create RemoteCommonArea", "cluster", clusterID)
 		return err

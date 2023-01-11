@@ -31,8 +31,12 @@ import (
 	"antrea.io/antrea/pkg/agent/util"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	"antrea.io/antrea/pkg/ovs/ovsctl"
-	"antrea.io/antrea/pkg/util/ip"
 	utilip "antrea.io/antrea/pkg/util/ip"
+)
+
+var (
+	// setInterfaceMTU is meant to be overridden for testing
+	setInterfaceMTU = util.SetInterfaceMTU
 )
 
 func (i *Initializer) prepareHostNetwork() error {
@@ -65,7 +69,7 @@ func (i *Initializer) prepareHNSNetworkAndOVSExtension() error {
 	// Get uplink network configuration. The uplink interface is the one used for transporting Pod traffic across Nodes.
 	// Use the interface specified with "transportInterface" in the configuration if configured, otherwise the interface
 	// configured with NodeIP is used as uplink.
-	_, _, adapter, err := i.getNodeInterfaceFromIP(&ip.DualStackIPs{IPv4: i.nodeConfig.NodeTransportIPv4Addr.IP})
+	_, _, adapter, err := i.getNodeInterfaceFromIP(&utilip.DualStackIPs{IPv4: i.nodeConfig.NodeTransportIPv4Addr.IP})
 	if err != nil {
 		return err
 	}
@@ -393,30 +397,6 @@ func (i *Initializer) saveHostRoutes() error {
 	return nil
 }
 
-// restoreHostRoutes restores the host routes which are lost when moving the IP
-// configuration of uplink interface to the OVS bridge interface during
-// the antrea network initialize stage.
-// The backup routes are restored after the IP configuration change.
-func (i *Initializer) restoreHostRoutes() error {
-	brInterface, err := net.InterfaceByName(i.ovsBridge)
-	if err != nil {
-		return nil
-	}
-	for _, route := range i.nodeConfig.UplinkNetConfig.Routes {
-		rt := route.(util.Route)
-		newRt := util.Route{
-			LinkIndex:         brInterface.Index,
-			DestinationSubnet: rt.DestinationSubnet,
-			GatewayAddress:    rt.GatewayAddress,
-			RouteMetric:       rt.RouteMetric,
-		}
-		if err := util.NewNetRoute(&newRt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func GetTransportIPNetDeviceByName(ifaceName string, ovsBridgeName string) (*net.IPNet, *net.IPNet, *net.Interface, error) {
 	// Find transport Interface in the order: ifaceName -> br-int. Return immediately if
 	// an interface using the specified name exists. Using br-int is for restart agent case.
@@ -444,7 +424,7 @@ func (i *Initializer) setInterfaceMTU(iface string, mtu int) error {
 	if err := i.ovsBridgeClient.SetInterfaceMTU(iface, mtu); err != nil {
 		return err
 	}
-	return util.SetInterfaceMTU(iface, mtu)
+	return setInterfaceMTU(iface, mtu)
 }
 
 func (i *Initializer) setVMNodeConfig(en *v1alpha1.ExternalNode, nodeName string) error {
@@ -497,5 +477,9 @@ func (i *Initializer) installVMInitialFlows() error {
 	if err := i.ofClient.InstallVMUplinkFlows(hostIFName, hostOFPort, uplinkOFPort); err != nil {
 		return fmt.Errorf("failed to install host fows for interface %s", hostIFName)
 	}
+	return nil
+}
+
+func (i *Initializer) prepareL7NetworkPolicyInterfaces() error {
 	return nil
 }

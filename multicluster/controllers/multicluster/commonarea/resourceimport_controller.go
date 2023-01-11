@@ -80,30 +80,22 @@ func NewResourceImportReconciler(client client.Client, scheme *runtime.Scheme, l
 	}
 }
 
-//+kubebuilder:rbac:groups=crd.antrea.io,resources=clusternetworkpolicies,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=crd.antrea.io,resources=tiers,verbs=get;list;watch
-//+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports/finalizers,verbs=update
-//+kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceimports,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceimports/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch;update;create;patch;delete
-//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;update;create;patch;delete
-//+kubebuilder:rbac:groups="",resources=events,verbs=create
+// +kubebuilder:rbac:groups=crd.antrea.io,resources=clusternetworkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=crd.antrea.io,resources=tiers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=multicluster.crd.antrea.io,resources=resourceimports/finalizers,verbs=update
+// +kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceimports,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=multicluster.x-k8s.io,resources=serviceimports/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch;update;create;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;update;create;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create
 
 // Reconcile will attempt to ensure that the imported Resource is installed in local cluster as per the
 // ResourceImport object.
 func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	klog.V(2).InfoS("Reconciling ResourceImport", "resourceimport", req.NamespacedName)
 	// TODO: Must check whether this ResourceImport must be reconciled by this member cluster. Check `spec.clusters` field.
-	if r.localClusterClient == nil {
-		return ctrl.Result{}, errors.New("localClusterClient has not been initialized properly, no local cluster client")
-	}
-
-	if r.remoteCommonArea == nil {
-		return ctrl.Result{}, errors.New("remoteCommonArea has not been initialized properly, no remote common area")
-	}
-
 	var resImp multiclusterv1alpha1.ResourceImport
 	err := r.remoteCommonArea.Get(ctx, req.NamespacedName, &resImp)
 	var isDeleted bool
@@ -123,7 +115,6 @@ func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 		}
 	}
-
 	switch resImp.Spec.Kind {
 	case common.ServiceImportKind:
 		if isDeleted {
@@ -151,7 +142,7 @@ func (r *ResourceImportReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 func (r *ResourceImportReconciler) handleResImpUpdateForService(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
 	svcImpName := types.NamespacedName{Namespace: resImp.Spec.Namespace, Name: resImp.Spec.Name}
-	svcName := types.NamespacedName{Namespace: resImp.Spec.Namespace, Name: common.AntreaMCSPrefix + resImp.Spec.Name}
+	svcName := types.NamespacedName{Namespace: resImp.Spec.Namespace, Name: common.ToMCResourceName(resImp.Spec.Name)}
 	klog.InfoS("Updating Service and ServiceImport corresponding to ResourceImport",
 		"service", svcName.String(), "serviceimport", svcImpName.String(), "resourceimport", klog.KObj(resImp))
 
@@ -233,18 +224,19 @@ func (r *ResourceImportReconciler) handleResImpUpdateForService(ctx context.Cont
 
 func (r *ResourceImportReconciler) handleResImpDeleteForService(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
 	svcImpName := common.NamespacedName(resImp.Spec.Namespace, resImp.Spec.Name)
-	svcName := common.NamespacedName(resImp.Spec.Namespace, common.AntreaMCSPrefix+resImp.Spec.Name)
+	svcName := common.NamespacedName(resImp.Spec.Namespace, common.ToMCResourceName(resImp.Spec.Name))
 	klog.InfoS("Deleting Service and ServiceImport corresponding to ResourceImport", "service", svcName,
 		"serviceImport", svcImpName, "resourceimport", klog.KObj(resImp))
 
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: resImp.Spec.Namespace,
-			Name:      common.AntreaMCSPrefix + resImp.Spec.Name,
+			Name:      common.ToMCResourceName(resImp.Spec.Name),
 		},
 	}
 	err := r.localClusterClient.Delete(ctx, svc, &client.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
+		klog.ErrorS(err, "Failed to delete imported Service", "service", svcName)
 		return ctrl.Result{}, err
 	}
 
@@ -254,12 +246,17 @@ func (r *ResourceImportReconciler) handleResImpDeleteForService(ctx context.Cont
 			Name:      resImp.Spec.Name,
 		},
 	}
-	err = r.localClusterClient.Delete(ctx, svcImp, &client.DeleteOptions{})
-	return ctrl.Result{}, client.IgnoreNotFound(err)
+	err = client.IgnoreNotFound(r.localClusterClient.Delete(ctx, svcImp, &client.DeleteOptions{}))
+	if err != nil {
+		klog.ErrorS(err, "Failed to delete ServiceImport for ResourceImport", "serviceImport", svcImpName)
+		return ctrl.Result{}, err
+	}
+	r.installedResImports.Delete(*resImp)
+	return ctrl.Result{}, nil
 }
 
 func (r *ResourceImportReconciler) handleResImpUpdateForEndpoints(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
-	epName := common.AntreaMCSPrefix + resImp.Spec.Name
+	epName := common.ToMCResourceName(resImp.Spec.Name)
 	epNamespaced := types.NamespacedName{Namespace: resImp.Spec.Namespace, Name: epName}
 	klog.InfoS("Updating Endpoints corresponding to ResourceImport", "endpoints", epNamespaced.String(),
 		"resourceimport", klog.KObj(resImp))
@@ -314,7 +311,7 @@ func (r *ResourceImportReconciler) handleResImpUpdateForEndpoints(ctx context.Co
 }
 
 func (r *ResourceImportReconciler) handleResImpDeleteForEndpoints(ctx context.Context, resImp *multiclusterv1alpha1.ResourceImport) (ctrl.Result, error) {
-	epName := common.AntreaMCSPrefix + resImp.Spec.Name
+	epName := common.ToMCResourceName(resImp.Spec.Name)
 	epNamespacedName := common.NamespacedName(resImp.Spec.Namespace, epName)
 	klog.InfoS("Deleting Endpoints corresponding to ResourceImport", "endpoints", epNamespacedName,
 		"resourceimport", klog.KObj(resImp))
@@ -325,11 +322,12 @@ func (r *ResourceImportReconciler) handleResImpDeleteForEndpoints(ctx context.Co
 			Namespace: resImp.Spec.Namespace,
 		},
 	}
-	err := r.localClusterClient.Delete(ctx, ep, &client.DeleteOptions{})
+	err := client.IgnoreNotFound(r.localClusterClient.Delete(ctx, ep, &client.DeleteOptions{}))
 	if err != nil {
-		klog.InfoS("Failed to delete imported Endpoints", "endpoints", epNamespacedName, "err", err)
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		klog.ErrorS(err, "Failed to delete imported Endpoints", "endpoints", epNamespacedName)
+		return ctrl.Result{}, err
 	}
+	r.installedResImports.Delete(*resImp)
 	return ctrl.Result{}, nil
 }
 
@@ -344,7 +342,7 @@ func getMCService(resImp *multiclusterv1alpha1.ResourceImport) *corev1.Service {
 	}
 	mcs := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      common.AntreaMCSPrefix + resImp.Spec.Name,
+			Name:      common.ToMCResourceName(resImp.Spec.Name),
 			Namespace: resImp.Spec.Namespace,
 			Annotations: map[string]string{
 				common.AntreaMCServiceAnnotation: "true",
@@ -374,7 +372,16 @@ func getMCServiceImport(resImp *multiclusterv1alpha1.ResourceImport) *k8smcsv1al
 // in the remoteCommonArea.
 func (r *ResourceImportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Ignore status update event via GenerationChangedPredicate
-	instance := predicate.GenerationChangedPredicate{}
+	generationPredicate := predicate.GenerationChangedPredicate{}
+	// Register this filter to ignore LabelIdentity kind of ResourceImport
+	labelIdentityResImportFilter := func(object client.Object) bool {
+		if resImport, ok := object.(*multiclusterv1alpha1.ResourceImport); ok {
+			return resImport.Spec.Kind != common.LabelIdentityKind
+		}
+		return false
+	}
+	labelIdentityResImportPredicate := predicate.NewPredicateFuncs(labelIdentityResImportFilter)
+	instance := predicate.And(generationPredicate, labelIdentityResImportPredicate)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&multiclusterv1alpha1.ResourceImport{}).
 		WithEventFilter(instance).

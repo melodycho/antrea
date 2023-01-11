@@ -391,6 +391,7 @@ type OFEntryOperations interface {
 	BundleOps(adds []binding.Flow, mods []binding.Flow, dels []binding.Flow) error
 	DeleteAll(flows []binding.Flow) error
 	AddOFEntries(ofEntries []binding.OFEntry) error
+	ModifyOFEntries(ofEntries []binding.OFEntry) error
 	DeleteOFEntries(ofEntries []binding.OFEntry) error
 }
 
@@ -404,6 +405,7 @@ type client struct {
 	enableProxy           bool
 	proxyAll              bool
 	enableAntreaPolicy    bool
+	enableL7NetworkPolicy bool
 	enableDenyTracking    bool
 	enableEgress          bool
 	enableMulticast       bool
@@ -433,11 +435,12 @@ type client struct {
 	// enables convenient mocking in unit tests.
 	ofEntryOperations OFEntryOperations
 	// replayMutex provides exclusive access to the OFSwitch to the ReplayFlows method.
-	replayMutex   sync.RWMutex
-	nodeConfig    *config.NodeConfig
-	networkConfig *config.NetworkConfig
-	egressConfig  *config.EgressConfig
-	serviceConfig *config.ServiceConfig
+	replayMutex           sync.RWMutex
+	nodeConfig            *config.NodeConfig
+	networkConfig         *config.NetworkConfig
+	egressConfig          *config.EgressConfig
+	serviceConfig         *config.ServiceConfig
+	l7NetworkPolicyConfig *config.L7NetworkPolicyConfig
 	// ovsMetersAreSupported indicates whether the OVS datapath supports OpenFlow meters.
 	ovsMetersAreSupported bool
 	// packetInHandlers stores handler to process PacketIn event. Each packetin reason can have multiple handlers registered.
@@ -543,6 +546,10 @@ func (c *client) AddOFEntries(ofEntries []binding.OFEntry) error {
 	return c.changeOFEntries(ofEntries, add)
 }
 
+func (c *client) ModifyOFEntries(ofEntries []binding.OFEntry) error {
+	return c.changeOFEntries(ofEntries, mod)
+}
+
 func (c *client) DeleteOFEntries(ofEntries []binding.OFEntry) error {
 	return c.changeOFEntries(ofEntries, del)
 }
@@ -614,10 +621,20 @@ func (f *featurePodConnectivity) gatewayClassifierFlow() binding.Flow {
 }
 
 // podClassifierFlow generates the flow to mark the packets from a local Pod port.
-func (f *featurePodConnectivity) podClassifierFlow(podOFPort uint32, isAntreaFlexibleIPAM bool) binding.Flow {
+// If multi-cluster is enabled, also load podLabelID into LabelIDField.
+func (f *featurePodConnectivity) podClassifierFlow(podOFPort uint32, isAntreaFlexibleIPAM bool, podLabelID *uint32) binding.Flow {
 	regMarksToLoad := []*binding.RegMark{FromLocalRegMark}
 	if isAntreaFlexibleIPAM {
 		regMarksToLoad = append(regMarksToLoad, AntreaFlexibleIPAMRegMark, RewriteMACRegMark)
+	}
+	if podLabelID != nil {
+		return ClassifierTable.ofTable.BuildFlow(priorityLow).
+			Cookie(f.cookieAllocator.Request(f.category).Raw()).
+			MatchInPort(podOFPort).
+			Action().LoadRegMark(regMarksToLoad...).
+			Action().SetTunnelID(uint64(*podLabelID)).
+			Action().GotoStage(stageValidation).
+			Done()
 	}
 	return ClassifierTable.ofTable.BuildFlow(priorityLow).
 		Cookie(f.cookieAllocator.Request(f.category).Raw()).
@@ -1727,7 +1744,7 @@ func (f *featurePodConnectivity) ipv6Flows() []binding.Flow {
 
 // For normal traffic, conjunctionActionFlow generates the flow to jump to a specific table if policyRuleConjunction ID is matched. Priority of
 // conjunctionActionFlow is created at priorityLow for k8s network policies, and *priority assigned by PriorityAssigner for AntreaPolicy.
-func (f *featureNetworkPolicy) conjunctionActionFlow(conjunctionID uint32, table binding.Table, nextTable uint8, priority *uint16, enableLogging bool) []binding.Flow {
+func (f *featureNetworkPolicy) conjunctionActionFlow(conjunctionID uint32, table binding.Table, nextTable uint8, priority *uint16, enableLogging bool, l7RuleVlanID *uint32) []binding.Flow {
 	tableID := table.GetID()
 	cookieID := f.cookieAllocator.Request(f.category).Raw()
 	var ofPriority uint16
@@ -1754,12 +1771,37 @@ func (f *featureNetworkPolicy) conjunctionActionFlow(conjunctionID uint32, table
 			if f.ovsMetersAreSupported {
 				fb = fb.Action().Meter(PacketInMeterIDNP)
 			}
+			if l7RuleVlanID != nil {
+				return fb.
+					Action().LoadToRegField(conjReg, conjunctionID).                           // Traceflow.
+					Action().LoadRegMark(DispositionAllowRegMark, CustomReasonLoggingRegMark). // AntreaPolicy, Enable logging.
+					Action().SendToController(uint8(PacketInReasonNP)).
+					Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
+					LoadToLabelField(uint64(conjunctionID), labelField).
+					LoadToCtMark(L7NPRedirectCTMark).                               // Mark the packets of the connection should be redirected to an application-aware engine.
+					LoadToLabelField(uint64(*l7RuleVlanID), L7NPRuleVlanIDCTLabel). // Load the VLAN ID allocated for L7 NetworkPolicy rule to CT mark field L7NPRuleVlanIDCTMarkField.
+					CTDone().
+					Cookie(cookieID).
+					Done()
+			}
 			return fb.
 				Action().LoadToRegField(conjReg, conjunctionID).                           // Traceflow.
 				Action().LoadRegMark(DispositionAllowRegMark, CustomReasonLoggingRegMark). // AntreaPolicy, Enable logging.
 				Action().SendToController(uint8(PacketInReasonNP)).
 				Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
 				LoadToLabelField(uint64(conjunctionID), labelField).
+				CTDone().
+				Cookie(cookieID).
+				Done()
+		}
+		if l7RuleVlanID != nil {
+			return table.BuildFlow(ofPriority).MatchProtocol(proto).
+				MatchConjID(conjunctionID).
+				Action().LoadToRegField(conjReg, conjunctionID).        // Traceflow.
+				Action().CT(true, nextTable, ctZone, f.ctZoneSrcField). // CT action requires commit flag if actions other than NAT without arguments are specified.
+				LoadToLabelField(uint64(conjunctionID), labelField).
+				LoadToCtMark(L7NPRedirectCTMark).                               // Mark the packets of the connection should be redirected to an application-aware engine.
+				LoadToLabelField(uint64(*l7RuleVlanID), L7NPRuleVlanIDCTLabel). // Load the VLAN ID allocated for L7 NetworkPolicy rule to CT mark field L7NPRuleVlanIDCTMarkField.
 				CTDone().
 				Cookie(cookieID).
 				Done()
@@ -1966,12 +2008,15 @@ func (f *featureNetworkPolicy) addFlowMatch(fb binding.FlowBuilder, matchKey *ty
 		fb = fb.MatchRegFieldWithValue(ServiceGroupIDField, matchValue.(uint32))
 	case MatchIGMPProtocol:
 		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+	case MatchLabelID:
+		fb = fb.MatchTunnelID(uint64(matchValue.(uint32)))
 	}
 	return fb
 }
 
 // conjunctionExceptionFlow generates the flow to jump to a specific table if both policyRuleConjunction ID and except address are matched.
 // Keeping this for reference to generic exception flow.
+// nolint: unused
 func (f *featureNetworkPolicy) conjunctionExceptionFlow(conjunctionID uint32, tableID uint8, nextTable uint8, matchKey *types.MatchKey, matchValue interface{}) binding.Flow {
 	conjReg := TFIngressConjIDField
 	if tableID == EgressRuleTable.GetID() {
@@ -2046,9 +2091,10 @@ func (f *featureNetworkPolicy) dnsPacketInFlow(conjunctionID uint32) binding.Flo
 // ingress rule of Network Policies. The packets are sent by kubelet to probe the liveness/readiness of local Pods.
 // On Linux and when OVS kernel datapath is used, the probe packets are identified by matching the HostLocalSourceMark.
 // On Windows or when OVS userspace (netdev) datapath is used, we need a different approach because:
-// 1. On Windows, kube-proxy userspace mode is used, and currently there is no way to distinguish kubelet generated traffic
-//    from kube-proxy proxied traffic.
-// 2. pkt_mark field is not properly supported for OVS userspace (netdev) datapath.
+//  1. On Windows, kube-proxy userspace mode is used, and currently there is no way to distinguish kubelet generated traffic
+//     from kube-proxy proxied traffic.
+//  2. pkt_mark field is not properly supported for OVS userspace (netdev) datapath.
+//
 // When proxyAll is disabled, the probe packets are identified by matching the source IP is the Antrea gateway IP;
 // otherwise, the packets are identified by matching both the Antrea gateway IP and NotServiceCTMark. Note that, when
 // proxyAll is disabled, currently there is no way to distinguish kubelet generated traffic from kube-proxy proxied traffic
@@ -2112,7 +2158,7 @@ func (f *featureNetworkPolicy) ingressClassifierFlows() []binding.Flow {
 			Action().GotoTable(IngressMetricTable.GetID()).
 			Done(),
 	}
-	if f.proxyAll {
+	if f.enableAntreaPolicy && f.proxyAll {
 		// This generates the flow to match the NodePort Service packets and forward them to AntreaPolicyIngressRuleTable.
 		// Policies applied on NodePort Service will be enforced in AntreaPolicyIngressRuleTable.
 		flows = append(flows, IngressSecurityClassifierTable.ofTable.BuildFlow(priorityNormal+1).
@@ -2179,7 +2225,7 @@ func (f *featureEgress) snatRuleFlow(ofPort uint32, snatIP net.IP, snatMark uint
 		Action().SetSrcMAC(localGatewayMAC).
 		Action().SetDstMAC(GlobalVirtualMAC).
 		Action().SetTunnelDst(snatIP). // Set tunnel destination to the SNAT IP.
-		Action().LoadRegMark(ToTunnelRegMark).
+		Action().LoadRegMark(ToTunnelRegMark, RemoteSNATRegMark).
 		Action().GotoStage(stageSwitching).
 		Done()
 }
@@ -2277,8 +2323,7 @@ func (f *featureService) serviceLearnFlow(groupID binding.GroupIDType,
 			MatchLearnedSrcIP().
 			LoadFieldToField(EndpointIPField, EndpointIPField).
 			LoadFieldToField(EndpointPortField, EndpointPortField).
-			LoadRegMark(EpSelectedRegMark).
-			LoadRegMark(RewriteMACRegMark).
+			LoadRegMark(EpSelectedRegMark, RewriteMACRegMark).
 			Done().
 			Action().LoadRegMark(EpSelectedRegMark).
 			Action().NextTable().
@@ -2289,8 +2334,7 @@ func (f *featureService) serviceLearnFlow(groupID binding.GroupIDType,
 			MatchLearnedSrcIPv6().
 			LoadXXRegToXXReg(EndpointIP6Field, EndpointIP6Field).
 			LoadFieldToField(EndpointPortField, EndpointPortField).
-			LoadRegMark(EpSelectedRegMark).
-			LoadRegMark(RewriteMACRegMark).
+			LoadRegMark(EpSelectedRegMark, RewriteMACRegMark).
 			Done().
 			Action().LoadRegMark(EpSelectedRegMark).
 			Action().NextTable().
@@ -2345,9 +2389,10 @@ func (f *featureService) serviceLBFlow(groupID binding.GroupIDType,
 			MatchRegMark(EpToSelectRegMark).
 			Action().LoadRegMark(regMarksToLoad...)
 	}
-	return flowBuilder.
-		Action().LoadToRegField(ServiceGroupIDField, uint32(groupID)).
-		Action().Group(groupID).Done()
+	if f.enableAntreaPolicy {
+		flowBuilder = flowBuilder.Action().LoadToRegField(ServiceGroupIDField, uint32(groupID))
+	}
+	return flowBuilder.Action().Group(groupID).Done()
 }
 
 // endpointDNATFlow generates the flow which transforms the Service Cluster IP to the Endpoint IP according to the Endpoint
@@ -2580,6 +2625,18 @@ func pipelineClassifyFlow(cookieID uint64, protocol binding.Protocol, pipeline b
 		Done()
 }
 
+// igmpEgressFlow generates flows to match IGMP report to jump to table MulticastRoutingTable.
+// This is because normal multicast egress rule can match IGMP v1 report, when there is egress
+// rule to block multicast traffic, IGMP v1 report will also be blocked, which is not expected.
+func (f *featureMulticast) igmpEgressFlow() binding.Flow {
+	return MulticastEgressRuleTable.ofTable.BuildFlow(priorityTopAntreaPolicy).
+		Cookie(f.cookieAllocator.Request(f.category).Raw()).
+		MatchProtocol(binding.ProtocolIGMP).
+		MatchRegMark(FromLocalRegMark).
+		Action().GotoStage(stageRouting).
+		Done()
+}
+
 // igmpPktInFlows generates the flow to load CustomReasonIGMPRegMark to mark the IGMP packet in MulticastRoutingTable
 // and sends it to antrea-agent.
 func (f *featureMulticast) igmpPktInFlows(reason uint8) []binding.Flow {
@@ -2642,6 +2699,7 @@ func NewClient(bridgeName string,
 	mgmtAddr string,
 	enableProxy bool,
 	enableAntreaPolicy bool,
+	enableL7NetworkPolicy bool,
 	enableEgress bool,
 	enableDenyTracking bool,
 	proxyAll bool,
@@ -2655,6 +2713,7 @@ func NewClient(bridgeName string,
 		enableProxy:           enableProxy,
 		proxyAll:              proxyAll,
 		enableAntreaPolicy:    enableAntreaPolicy,
+		enableL7NetworkPolicy: enableL7NetworkPolicy,
 		enableDenyTracking:    enableDenyTracking,
 		enableEgress:          enableEgress,
 		enableMulticast:       enableMulticast,
@@ -2744,19 +2803,21 @@ func (f *featurePodConnectivity) l3FwdFlowToNode() []binding.Flow {
 
 // l3FwdFlowToExternal generates the flow to forward packets destined for external network. Corresponding cases are listed
 // in the follows:
-//  - when Egress is disabled, request packets of connections sourced from local Pods and destined for external network.
-//  - when AntreaIPAM is enabled, request packets of connections sourced from local AntreaIPAM Pods and destined for external network.
+//   - when Egress is disabled, request packets of connections sourced from local Pods and destined for external network.
+//   - when AntreaIPAM is enabled, request packets of connections sourced from local AntreaIPAM Pods and destined for external network.
+//
 // TODO: load ToUplinkRegMark to packets sourced from AntreaIPAM Pods and destined for external network.
-//  Due to the lack of defined variables of flow priority, there are not enough flow priority to install the flows to
-//  differentiate the packets sourced from AntreaIPAM Pods and non-AntreaIPAM Pods. For the packets sourced from AntreaIPAM
-//  Pods and destined for external network, they are forwarded via uplink port, not Antrea gateway. Apparently, loading
-//  ToGatewayRegMark to such packets is not right. However, packets sourced from AntreaIPAM Pods with ToGatewayRegMark
-//  don't cause unexpected effects to the consumers of ToGatewayRegMark and ToUplinkRegMark. Consumers of these two
-//  marks are listed in the follows:
-//  - In IngressSecurityClassifierTable, flows are installed to forward the packets with ToGatewayRegMark, ToGatewayRegMark
-//    or ToUplinkRegMark to IngressMetricTable directly.
-//  - In ServiceMarkTable, ToGatewayRegMark is used with FromGatewayRegMark together.
-//  - In ServiceMarkTable, ToUplinkRegMark is only used in noEncap mode + Windows.
+//
+// Due to the lack of defined variables of flow priority, there are not enough flow priority to install the flows to
+// differentiate the packets sourced from AntreaIPAM Pods and non-AntreaIPAM Pods. For the packets sourced from AntreaIPAM
+// Pods and destined for external network, they are forwarded via uplink port, not Antrea gateway. Apparently, loading
+// ToGatewayRegMark to such packets is not right. However, packets sourced from AntreaIPAM Pods with ToGatewayRegMark
+// don't cause unexpected effects to the consumers of ToGatewayRegMark and ToUplinkRegMark. Consumers of these two
+// marks are listed in the follows:
+//   - In IngressSecurityClassifierTable, flows are installed to forward the packets with ToGatewayRegMark, ToGatewayRegMark
+//     or ToUplinkRegMark to IngressMetricTable directly.
+//   - In ServiceMarkTable, ToGatewayRegMark is used with FromGatewayRegMark together.
+//   - In ServiceMarkTable, ToUplinkRegMark is only used in noEncap mode + Windows.
 func (f *featurePodConnectivity) l3FwdFlowToExternal() binding.Flow {
 	return L3ForwardingTable.ofTable.BuildFlow(priorityMiss).
 		Cookie(f.cookieAllocator.Request(f.category).Raw()).

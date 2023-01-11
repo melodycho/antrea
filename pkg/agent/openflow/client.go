@@ -48,7 +48,8 @@ type Client interface {
 		config *config.NodeConfig,
 		networkConfig *config.NetworkConfig,
 		egressConfig *config.EgressConfig,
-		serviceConfig *config.ServiceConfig) (<-chan struct{}, error)
+		serviceConfig *config.ServiceConfig,
+		l7NetworkPolicyConfig *config.L7NetworkPolicyConfig) (<-chan struct{}, error)
 
 	// InstallNodeFlows should be invoked when a connection to a remote Node is going to be set
 	// up. The hostname is used to identify the added flows. When IPsec tunnel is enabled,
@@ -75,7 +76,7 @@ type Client interface {
 	// flows will be installed). Calls to InstallPodFlows are idempotent. Concurrent calls
 	// to InstallPodFlows and / or UninstallPodFlows are supported as long as they are all
 	// for different interfaceNames.
-	InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, ofPort uint32, vlanID uint16) error
+	InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, ofPort uint32, vlanID uint16, labelID *uint32) error
 
 	// UninstallPodFlows removes the connection to the local Pod specified with the
 	// interfaceName. UninstallPodFlows will do nothing if no connection to the Pod was established.
@@ -84,9 +85,9 @@ type Client interface {
 	// InstallServiceGroup installs a group for Service LB. Each endpoint
 	// is a bucket of the group. For now, each bucket has the same weight.
 	InstallServiceGroup(groupID binding.GroupIDType, withSessionAffinity bool, endpoints []proxy.Endpoint) error
-	// UninstallGroup removes the group and its buckets that are
-	// installed by InstallServiceGroup or InstallMulticastGroup.
-	UninstallGroup(groupID binding.GroupIDType) error
+	// UninstallServiceGroup removes the group and its buckets that are
+	// installed by InstallServiceGroup.
+	UninstallServiceGroup(groupID binding.GroupIDType) error
 
 	// InstallEndpointFlows installs flows for accessing Endpoints.
 	// If an Endpoint is on the current Node, then flows for hairpin and endpoint
@@ -211,7 +212,7 @@ type Client interface {
 	InitialTLVMap() error
 
 	// Find Network Policy reference and OFpriority by conjunction ID.
-	GetPolicyInfoFromConjunction(ruleID uint32) (string, string)
+	GetPolicyInfoFromConjunction(ruleID uint32) (string, string, string)
 
 	// RegisterPacketInHandler uses SubscribePacketIn to get PacketIn message and process received
 	// packets through registered handlers.
@@ -278,9 +279,6 @@ type Client interface {
 	AddAddressToDNSConjunction(id uint32, addrs []types.Address) error
 	// DeleteAddressFromDNSConjunction removes addresses from the toAddresses of the dns packetIn conjunction.
 	DeleteAddressFromDNSConjunction(id uint32, addrs []types.Address) error
-	// InstallMulticastInitialFlows installs OpenFlow to packetIn the IGMP messages and output the Multicast traffic to
-	// antrea-gw0 so that local Pods could access external Multicast servers.
-	InstallMulticastInitialFlows(pktInReason uint8) error
 
 	// InstallMulticastFlows installs the flow to forward Multicast traffic normally, and output it to antrea-gw0
 	// to ensure it can be forwarded to the external addresses.
@@ -314,6 +312,9 @@ type Client interface {
 	UninstallTrafficControlReturnPortFlow(returnOFPort uint32) error
 
 	InstallMulticastGroup(ofGroupID binding.GroupIDType, localReceivers []uint32, remoteNodeReceivers []net.IP) error
+	// UninstallMulticastGroup removes the group and its buckets that are
+	// installed by InstallMulticastGroup.
+	UninstallMulticastGroup(groupID binding.GroupIDType) error
 
 	// SendIGMPRemoteReportPacketOut sends the IGMP report packet as a packet-out to remote Nodes via the tunnel port.
 	SendIGMPRemoteReportPacketOut(
@@ -326,14 +327,16 @@ type Client interface {
 	InstallMulticlusterNodeFlows(
 		clusterID string,
 		peerConfigs map[*net.IPNet]net.IP,
-		tunnelPeerIP net.IP) error
+		tunnelPeerIP net.IP,
+		enableStretchedNetworkPolicy bool) error
 
 	// InstallMulticlusterGatewayFlows installs flows to handle cross-cluster packets between Gateways.
 	InstallMulticlusterGatewayFlows(
 		clusterID string,
 		peerConfigs map[*net.IPNet]net.IP,
 		tunnelPeerIP net.IP,
-		localGatewayIP net.IP) error
+		localGatewayIP net.IP,
+		enableStretchedNetworkPolicy bool) error
 
 	// InstallMulticlusterClassifierFlows installs flows to classify cross-cluster packets.
 	InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway bool) error
@@ -524,7 +527,7 @@ func (c *client) UninstallNodeFlows(hostname string) error {
 	return c.deleteFlows(c.featurePodConnectivity.nodeCachedFlows, hostname)
 }
 
-func (c *client) InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, ofPort uint32, vlanID uint16) error {
+func (c *client) InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP, podInterfaceMAC net.HardwareAddr, ofPort uint32, vlanID uint16, labelID *uint32) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 
@@ -534,7 +537,7 @@ func (c *client) InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP,
 
 	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
 	flows := []binding.Flow{
-		c.featurePodConnectivity.podClassifierFlow(ofPort, isAntreaFlexibleIPAM),
+		c.featurePodConnectivity.podClassifierFlow(ofPort, isAntreaFlexibleIPAM, labelID),
 		c.featurePodConnectivity.l2ForwardCalcFlow(podInterfaceMAC, ofPort),
 	}
 
@@ -561,7 +564,7 @@ func (c *client) InstallPodFlows(interfaceName string, podInterfaceIPs []net.IP,
 			flows = append(flows, c.featurePodConnectivity.podVLANFlow(ofPort, vlanID))
 		}
 	}
-	err := c.addFlows(c.featurePodConnectivity.podCachedFlows, interfaceName, flows)
+	err := c.modifyFlows(c.featurePodConnectivity.podCachedFlows, interfaceName, flows)
 	if err != nil {
 		return err
 	}
@@ -620,20 +623,30 @@ func (c *client) InstallServiceGroup(groupID binding.GroupIDType, withSessionAff
 	defer c.replayMutex.RUnlock()
 
 	group := c.featureService.serviceEndpointGroup(groupID, withSessionAffinity, endpoints...)
-	if err := group.Add(); err != nil {
-		return fmt.Errorf("error when installing Service Endpoints Group: %w", err)
+	_, installed := c.featureService.groupCache.Load(groupID)
+	if !installed {
+		if err := c.ofEntryOperations.AddOFEntries([]binding.OFEntry{group}); err != nil {
+			return fmt.Errorf("error when installing Service Endpoints Group %d: %w", groupID, err)
+		}
+	} else {
+		if err := c.ofEntryOperations.ModifyOFEntries([]binding.OFEntry{group}); err != nil {
+			return fmt.Errorf("error when modifying Service Endpoints Group %d: %w", groupID, err)
+		}
 	}
 	c.featureService.groupCache.Store(groupID, group)
 	return nil
 }
 
-func (c *client) UninstallGroup(groupID binding.GroupIDType) error {
+func (c *client) UninstallServiceGroup(groupID binding.GroupIDType) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	if !c.bridge.DeleteGroup(groupID) {
-		return fmt.Errorf("group %d delete failed", groupID)
+	gCache, ok := c.featureService.groupCache.Load(groupID)
+	if ok {
+		if err := c.ofEntryOperations.DeleteOFEntries([]binding.OFEntry{gCache.(binding.Group)}); err != nil {
+			return fmt.Errorf("error when deleting Service Endpoints Group %d: %w", groupID, err)
+		}
+		c.featureService.groupCache.Delete(groupID)
 	}
-	c.featureService.groupCache.Delete(groupID)
 	return nil
 }
 
@@ -735,11 +748,13 @@ func (c *client) Initialize(roundInfo types.RoundInfo,
 	nodeConfig *config.NodeConfig,
 	networkConfig *config.NetworkConfig,
 	egressConfig *config.EgressConfig,
-	serviceConfig *config.ServiceConfig) (<-chan struct{}, error) {
+	serviceConfig *config.ServiceConfig,
+	l7NetworkPolicyConfig *config.L7NetworkPolicyConfig) (<-chan struct{}, error) {
 	c.nodeConfig = nodeConfig
 	c.networkConfig = networkConfig
 	c.egressConfig = egressConfig
 	c.serviceConfig = serviceConfig
+	c.l7NetworkPolicyConfig = l7NetworkPolicyConfig
 	c.nodeType = nodeConfig.Type
 
 	if networkConfig.IPv4Enabled {
@@ -805,6 +820,7 @@ func (c *client) generatePipelines() {
 			c.networkConfig,
 			c.serviceConfig,
 			c.bridge,
+			c.enableAntreaPolicy,
 			c.enableProxy,
 			c.proxyAll,
 			c.connectUplinkToBridge)
@@ -820,9 +836,11 @@ func (c *client) generatePipelines() {
 	c.featureNetworkPolicy = newFeatureNetworkPolicy(c.cookieAllocator,
 		c.ipProtocols,
 		c.bridge,
+		c.l7NetworkPolicyConfig,
 		c.ovsMetersAreSupported,
 		c.enableDenyTracking,
 		c.enableAntreaPolicy,
+		c.enableL7NetworkPolicy,
 		c.enableMulticast,
 		c.proxyAll,
 		c.connectUplinkToBridge,
@@ -1093,7 +1111,7 @@ func setBasePacketOutBuilder(packetOutBuilder binding.PacketOutBuilder, srcMAC s
 	return packetOutBuilder, nil
 }
 
-// SendTCPReject generates TCP packet as a packet-out and sends it to OVS.
+// SendTCPPacketOut generates TCP packet as a packet-out and sends it to OVS.
 func (c *client) SendTCPPacketOut(
 	srcMAC string,
 	dstMAC string,
@@ -1132,7 +1150,7 @@ func (c *client) SendTCPPacketOut(
 	return c.bridge.SendPacketOut(packetOutObj)
 }
 
-// SendICMPReject generates ICMP packet as a packet-out and send it to OVS.
+// SendICMPPacketOut generates ICMP packet as a packet-out and send it to OVS.
 func (c *client) SendICMPPacketOut(
 	srcMAC string,
 	dstMAC string,
@@ -1204,16 +1222,6 @@ func (c *client) SendUDPPacketOut(
 
 	packetOutObj := packetOutBuilder.Done()
 	return c.bridge.SendPacketOut(packetOutObj)
-}
-
-func (c *client) InstallMulticastInitialFlows(pktInReason uint8) error {
-	flows := c.featureMulticast.igmpPktInFlows(pktInReason)
-	flows = append(flows, c.featureMulticast.externalMulticastReceiverFlow())
-	flows = append(flows, c.featureMulticast.multicastSkipIGMPMetricFlows()...)
-	cacheKey := "multicast"
-	c.replayMutex.RLock()
-	defer c.replayMutex.RUnlock()
-	return c.addFlows(c.featureMulticast.cachedFlows, cacheKey, flows)
 }
 
 func (c *client) InstallMulticastFlows(multicastIP net.IP, groupID binding.GroupIDType) error {
@@ -1311,13 +1319,35 @@ func (c *client) SendIGMPRemoteReportPacketOut(
 func (c *client) InstallMulticastGroup(groupID binding.GroupIDType, localReceivers []uint32, remoteNodeReceivers []net.IP) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
-	table := MulticastOutputTable
+	nextTable := MulticastOutputTable.GetID()
 	if c.enableAntreaPolicy {
-		table = MulticastIngressRuleTable
+		nextTable = MulticastIngressRuleTable.GetID()
 	}
 
-	if err := c.featureMulticast.multicastReceiversGroup(groupID, table.GetID(), localReceivers, remoteNodeReceivers); err != nil {
-		return err
+	group := c.featureMulticast.multicastReceiversGroup(groupID, nextTable, localReceivers, remoteNodeReceivers)
+	_, installed := c.featureMulticast.groupCache.Load(groupID)
+	if !installed {
+		if err := c.ofEntryOperations.AddOFEntries([]binding.OFEntry{group}); err != nil {
+			return fmt.Errorf("error when installing Multicast receiver Group %d: %w", groupID, err)
+		}
+	} else {
+		if err := c.ofEntryOperations.ModifyOFEntries([]binding.OFEntry{group}); err != nil {
+			return fmt.Errorf("error when modifying Multicast receiver Group %d: %w", groupID, err)
+		}
+	}
+	c.featureMulticast.groupCache.Store(groupID, group)
+	return nil
+}
+
+func (c *client) UninstallMulticastGroup(groupID binding.GroupIDType) error {
+	c.replayMutex.RLock()
+	defer c.replayMutex.RUnlock()
+	gCache, ok := c.featureMulticast.groupCache.Load(groupID)
+	if ok {
+		if err := c.ofEntryOperations.DeleteOFEntries([]binding.OFEntry{gCache.(binding.Group)}); err != nil {
+			return fmt.Errorf("error when deleting Multicast receiver Group %d: %w", groupID, err)
+		}
+		c.featureMulticast.groupCache.Delete(groupID)
 	}
 	return nil
 }
@@ -1326,14 +1356,15 @@ func (c *client) InstallMulticastGroup(groupID binding.GroupIDType, localReceive
 // Node and a local Gateway.
 func (c *client) InstallMulticlusterNodeFlows(clusterID string,
 	peerConfigs map[*net.IPNet]net.IP,
-	tunnelPeerIP net.IP) error {
+	tunnelPeerIP net.IP,
+	enableStretchedNetworkPolicy bool) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
 	cacheKey := fmt.Sprintf("cluster_%s", clusterID)
 	var flows []binding.Flow
 	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
 	for peerCIDR, remoteGatewayIP := range peerConfigs {
-		flows = append(flows, c.featureMulticluster.l3FwdFlowToRemoteViaTun(localGatewayMAC, *peerCIDR, tunnelPeerIP, remoteGatewayIP)...)
+		flows = append(flows, c.featureMulticluster.l3FwdFlowToRemoteViaTun(localGatewayMAC, *peerCIDR, tunnelPeerIP, remoteGatewayIP, enableStretchedNetworkPolicy)...)
 	}
 	return c.modifyFlows(c.featureMulticluster.cachedFlows, cacheKey, flows)
 }
@@ -1343,6 +1374,7 @@ func (c *client) InstallMulticlusterGatewayFlows(clusterID string,
 	peerConfigs map[*net.IPNet]net.IP,
 	tunnelPeerIP net.IP,
 	localGatewayIP net.IP,
+	enableStretchedNetworkPolicy bool,
 ) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()
@@ -1350,7 +1382,7 @@ func (c *client) InstallMulticlusterGatewayFlows(clusterID string,
 	var flows []binding.Flow
 	localGatewayMAC := c.nodeConfig.GatewayConfig.MAC
 	for peerCIDR, remoteGatewayIP := range peerConfigs {
-		flows = append(flows, c.featureMulticluster.l3FwdFlowToRemoteViaTun(localGatewayMAC, *peerCIDR, tunnelPeerIP, remoteGatewayIP)...)
+		flows = append(flows, c.featureMulticluster.l3FwdFlowToRemoteViaTun(localGatewayMAC, *peerCIDR, tunnelPeerIP, remoteGatewayIP, enableStretchedNetworkPolicy)...)
 		// Add SNAT flows to change cross-cluster packets' source IP to local Gateway IP.
 		flows = append(flows, c.featureMulticluster.snatConntrackFlows(*peerCIDR, localGatewayIP)...)
 	}
@@ -1358,10 +1390,10 @@ func (c *client) InstallMulticlusterGatewayFlows(clusterID string,
 }
 
 // InstallMulticlusterClassifierFlows adds the following flows:
-// * One flow in L2ForwardingCalcTable for the global virtual multicluster MAC 'aa:bb:cc:dd:ee:f0'
-//   to set its target output port as 'antrea-tun0'. This flow will be on both Gateway and regular Node.
-// * One flow to match MC virtual MAC 'aa:bb:cc:dd:ee:f0' in ClassifierTable for Gateway only.
-// * One flow in L2ForwardingOutTable to allow multicluster hairpin traffic for Gateway only.
+//   - One flow in L2ForwardingCalcTable for the global virtual multicluster MAC 'aa:bb:cc:dd:ee:f0'
+//     to set its target output port as 'antrea-tun0'. This flow will be on both Gateway and regular Node.
+//   - One flow to match MC virtual MAC 'aa:bb:cc:dd:ee:f0' in ClassifierTable for Gateway only.
+//   - One flow in L2ForwardingOutTable to allow multicluster hairpin traffic for Gateway only.
 func (c *client) InstallMulticlusterClassifierFlows(tunnelOFPort uint32, isGateway bool) error {
 	c.replayMutex.RLock()
 	defer c.replayMutex.RUnlock()

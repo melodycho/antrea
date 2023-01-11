@@ -14,6 +14,10 @@
 
 package ovsconfig
 
+import (
+	"net"
+)
+
 type TunnelType string
 
 type OVSDatapathType string
@@ -26,7 +30,6 @@ const (
 	ERSPANTunnel = "erspan"
 
 	OVSDatapathSystem OVSDatapathType = "system"
-	OVSDatapathNetdev OVSDatapathType = "netdev"
 
 	OVSOtherConfigDatapathIDKey string = "datapath-id"
 )
@@ -65,4 +68,5 @@ type OVSBridgeClient interface {
 	GetOVSDatapathType() OVSDatapathType
 	SetInterfaceType(name, ifType string) Error
 	SetPortExternalIDs(portName string, externalIDs map[string]interface{}) Error
+	SetInterfaceMAC(name string, mac net.HardwareAddr) Error
 }

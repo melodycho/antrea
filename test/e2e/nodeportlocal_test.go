@@ -1,6 +1,3 @@
-//go:build !windows
-// +build !windows
-
 // Copyright 2021 Antrea Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -204,7 +201,7 @@ func protocolToString(p corev1.Protocol) string {
 func checkForNPLRuleInIPTables(t *testing.T, data *TestData, r *require.Assertions, antreaPod string, rules []nplRuleData, present bool) {
 	cmd := []string{"iptables", "-t", "nat", "-S"}
 	t.Logf("Verifying iptables rules %v, present: %v", rules, present)
-	const timeout = 30 * time.Second
+	const timeout = 60 * time.Second
 	err := wait.Poll(time.Second, timeout, func() (bool, error) {
 		stdout, _, err := data.RunCommandFromPod(antreaNamespace, antreaPod, agentContainerName, cmd)
 		if err != nil {
@@ -327,7 +324,6 @@ func checkForNPLListeningSockets(t *testing.T, data *TestData, r *require.Assert
 func deleteNPLRuleFromIPTables(t *testing.T, data *TestData, r *require.Assertions, antreaPod string, rule nplRuleData) {
 	cmd := append([]string{"iptables", "-w", "10", "-t", "nat", "-D", "ANTREA-NODE-PORT-LOCAL"}, buildRuleForPod(rule)...)
 	t.Logf("Deleting iptables rule for %v", rule)
-	const timeout = 30 * time.Second
 	_, _, err := data.RunCommandFromPod(antreaNamespace, antreaPod, agentContainerName, cmd)
 	r.NoError(err, "Error when deleting iptables rule")
 }

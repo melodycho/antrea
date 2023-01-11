@@ -1,6 +1,6 @@
 # -- Container image to use for Antrea components.
 image:
-  repository: "projects.registry.vmware.com/antrea/antrea-ubuntu"
+  repository: "antrea/antrea-ubuntu"
   pullPolicy: "IfNotPresent"
   tag: ""
 
@@ -14,6 +14,15 @@ tunnelType: "geneve"
 # (Geneve, VXLAN, and STT). If zero, it will use the assigned IANA port for the
 # protocol, i.e. 6081 for Geneve, 4789 for VXLAN, and 7471 for STT.
 tunnelPort: 0
+# -- TunnelCsum determines whether to compute UDP encapsulation header (Geneve
+# or VXLAN) checksums on outgoing packets. For Linux kernel before Mar 2021, UDP
+# checksum must be present to trigger GRO on the receiver for better performance
+# of Geneve and VXLAN tunnels. The issue has been fixed by
+# https://github.com/torvalds/linux/commit/89e5c58fc1e2857ccdaae506fb8bc5fed57ee063,
+# thus computing UDP checksum is no longer necessary.
+# It should only be set to true when you are using an unpatched Linux kernel and
+# observing poor transfer performance.
+tunnelCsum: false
 # -- Determines how tunnel traffic is encrypted. Currently encryption only works
 # with encap mode.It must be one of "none", "ipsec", "wireGuard".
 trafficEncryptionMode: "none"
@@ -57,6 +66,26 @@ ovs:
   # -- Enable hardware offload for the OVS bridge (required additional
   # configuration).
   hwOffload: false
+
+secondaryNetwork:
+  ovs:
+    # -- Enable OVS bridge configuration for secondary network.
+    enable: false
+    # -- Secondary network OVS integration bridge name.
+    integrationBridgeName: "br-secnet-int"
+    # -- Secondary network OVS transport bridge name.
+    transportBridgeName: "br-secnet-trans"
+    # -- Datapath type to use for the OpenVSwitch bridge created by Antrea. Supported values are:
+    # - system
+    # - netdev
+    # -- 'system' is the default value and corresponds to the kernel datapath. Use 'netdev' to run
+    # OVS in userspace mode. Userspace mode requires the tun device driver to be available.
+    datapathType: "system"
+    # -- Name of the OVS patch port which connects the integration and transport bridge.
+    patchPort: "br-secnet-patch0"
+  # -- Tunnel protocol used for encapsulating traffic across Nodes. It must be one
+  # of "geneve", "vxlan", "gre", "stt".
+  tunnelType: "geneve"
 
 wireGuard:
   # -- Port for WireGuard to send and receive traffic.
@@ -290,14 +319,18 @@ logVerbosity: 0
 whereabouts:
   enable: false
 
-## -- Configure Multicluster, for use by the antrea-agent.
+## -- Configure Multicluster defaults for both Antrea Controller and Agent.
 multicluster:
   # -- Enable Antrea Multi-cluster Gateway to support cross-cluster traffic.
   # This feature is supported only with encap mode.
-  enable: false
+  enableGateway: false
   # -- The Namespace where Antrea Multi-cluster Controller is running.
   # The default is antrea-agent's Namespace.
   namespace: ""
+  # -- Enable StretchedNetworkPolicy which allows Antrea-native policies to select peers
+  # from other clusters in a ClusterSet.
+  # Multi-cluster Gateway must be enabled to enable StretchedNetworkPolicy.
+  enableStretchedNetworkPolicy: false
 
 testing:
   ## -- enable code coverage measurement (used when testing Antrea only).

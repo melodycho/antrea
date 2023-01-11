@@ -112,6 +112,15 @@ const (
 	// alpha: v1.8
 	// Enable running agent on an unmanaged VM/BM.
 	ExternalNode featuregate.Feature = "ExternalNode"
+
+	// alpha: v1.10
+	// Enable collecting support bundle files with SupportBundleCollection CRD.
+	SupportBundleCollection featuregate.Feature = "SupportBundleCollection"
+
+	// alpha: v1.10
+	// Enable users to protect their applications by specifying how they are allowed to communicate with others, taking
+	// into account application context.
+	L7NetworkPolicy featuregate.Feature = "L7NetworkPolicy"
 )
 
 var (
@@ -126,24 +135,26 @@ var (
 	// To add a new feature, define a key for it above and add it here. The features will be
 	// available throughout Antrea binaries.
 	DefaultAntreaFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
-		AntreaPolicy:       {Default: true, PreRelease: featuregate.Beta},
-		AntreaProxy:        {Default: true, PreRelease: featuregate.Beta},
-		Egress:             {Default: true, PreRelease: featuregate.Beta},
-		EndpointSlice:      {Default: false, PreRelease: featuregate.Alpha},
-		TopologyAwareHints: {Default: false, PreRelease: featuregate.Alpha},
-		Traceflow:          {Default: true, PreRelease: featuregate.Beta},
-		AntreaIPAM:         {Default: false, PreRelease: featuregate.Alpha},
-		FlowExporter:       {Default: false, PreRelease: featuregate.Alpha},
-		NetworkPolicyStats: {Default: true, PreRelease: featuregate.Beta},
-		NodePortLocal:      {Default: true, PreRelease: featuregate.Beta},
-		NodeIPAM:           {Default: false, PreRelease: featuregate.Alpha},
-		Multicast:          {Default: false, PreRelease: featuregate.Alpha},
-		Multicluster:       {Default: false, PreRelease: featuregate.Alpha},
-		SecondaryNetwork:   {Default: false, PreRelease: featuregate.Alpha},
-		ServiceExternalIP:  {Default: false, PreRelease: featuregate.Alpha},
-		TrafficControl:     {Default: false, PreRelease: featuregate.Alpha},
-		IPsecCertAuth:      {Default: false, PreRelease: featuregate.Alpha},
-		ExternalNode:       {Default: false, PreRelease: featuregate.Alpha},
+		AntreaPolicy:            {Default: true, PreRelease: featuregate.Beta},
+		AntreaProxy:             {Default: true, PreRelease: featuregate.Beta},
+		Egress:                  {Default: true, PreRelease: featuregate.Beta},
+		EndpointSlice:           {Default: false, PreRelease: featuregate.Alpha},
+		TopologyAwareHints:      {Default: false, PreRelease: featuregate.Alpha},
+		Traceflow:               {Default: true, PreRelease: featuregate.Beta},
+		AntreaIPAM:              {Default: false, PreRelease: featuregate.Alpha},
+		FlowExporter:            {Default: false, PreRelease: featuregate.Alpha},
+		NetworkPolicyStats:      {Default: true, PreRelease: featuregate.Beta},
+		NodePortLocal:           {Default: true, PreRelease: featuregate.Beta},
+		NodeIPAM:                {Default: false, PreRelease: featuregate.Alpha},
+		Multicast:               {Default: false, PreRelease: featuregate.Alpha},
+		Multicluster:            {Default: false, PreRelease: featuregate.Alpha},
+		SecondaryNetwork:        {Default: false, PreRelease: featuregate.Alpha},
+		ServiceExternalIP:       {Default: false, PreRelease: featuregate.Alpha},
+		TrafficControl:          {Default: false, PreRelease: featuregate.Alpha},
+		IPsecCertAuth:           {Default: false, PreRelease: featuregate.Alpha},
+		ExternalNode:            {Default: false, PreRelease: featuregate.Alpha},
+		SupportBundleCollection: {Default: false, PreRelease: featuregate.Alpha},
+		L7NetworkPolicy:         {Default: false, PreRelease: featuregate.Alpha},
 	}
 
 	// UnsupportedFeaturesOnWindows records the features not supported on
@@ -165,15 +176,18 @@ var (
 		IPsecCertAuth:     {},
 		// Multicluster feature is not validated on Windows yet. This can removed
 		// in the future if it's fully tested on Windows.
-		Multicluster: {},
+		Multicluster:    {},
+		L7NetworkPolicy: {},
 	}
 	// supportedFeaturesOnExternalNode records the features supported on an external
 	// Node. Antrea Agent checks the enabled features if it is running on an
 	// unmanaged VM/BM, and fails the startup if an unsupported feature is enabled.
 	supportedFeaturesOnExternalNode = map[featuregate.Feature]struct{}{
-		ExternalNode:       {},
-		AntreaPolicy:       {},
-		NetworkPolicyStats: {},
+		ExternalNode:            {},
+		AntreaPolicy:            {},
+		NetworkPolicyStats:      {},
+		SupportBundleCollection: {},
+		L7NetworkPolicy:         {},
 	}
 )
 
@@ -202,7 +216,7 @@ func SupportedOnWindows(feature featuregate.Feature) bool {
 	return !exists
 }
 
-// SupportedOnExternalNode checks whether a feature is supported on a external Node.
+// SupportedOnExternalNode checks whether a feature is supported on an external Node.
 func SupportedOnExternalNode(feature featuregate.Feature) bool {
 	_, exists := DefaultAntreaFeatureGates[feature]
 	if !exists {

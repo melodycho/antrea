@@ -17,11 +17,12 @@ limitations under the License.
 package multicluster
 
 import (
-	"fmt"
+	"context"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,7 +40,6 @@ var (
 	clusterID   = "cluster-a"
 
 	gw1CreationTime = metav1.NewTime(time.Now())
-	gw2CreationTime = metav1.NewTime(time.Now().Add(10 * time.Minute))
 
 	gwNode1 = mcsv1alpha1.Gateway{
 		ObjectMeta: metav1.ObjectMeta{
@@ -50,15 +50,7 @@ var (
 		GatewayIP:  "10.10.10.10",
 		InternalIP: "172.11.10.1",
 	}
-	gwNode2 = mcsv1alpha1.Gateway{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "node-2",
-			Namespace:         "default",
-			CreationTimestamp: gw2CreationTime,
-		},
-		GatewayIP:  "10.8.8.8",
-		InternalIP: "172.11.10.1",
-	}
+
 	existingResExport = &mcsv1alpha1.ResourceExport{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "cluster-a-clusterinfo",
@@ -79,39 +71,20 @@ var (
 			},
 		},
 	}
-	existingResExport2 = &mcsv1alpha1.ResourceExport{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "cluster-a-clusterinfo",
-			Namespace: leaderNamespace,
-		},
-		Spec: mcsv1alpha1.ResourceExportSpec{
-			Name:      clusterID,
-			Namespace: "default",
-			Kind:      common.ClusterInfoKind,
-			ClusterInfo: &mcsv1alpha1.ClusterInfo{
-				ServiceCIDR: serviceCIDR,
-				ClusterID:   clusterID,
-				GatewayInfos: []mcsv1alpha1.GatewayInfo{
-					{
-						GatewayIP: "101.101.101.101",
-					},
-				},
-			},
-		},
-	}
 )
 
 func TestGatewayReconciler(t *testing.T) {
 	gwNode1New := gwNode1
 	gwNode1New.GatewayIP = "10.10.10.12"
-
+	staleExistingResExport := existingResExport.DeepCopy()
+	staleExistingResExport.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 	tests := []struct {
 		name           string
-		te             mcsv1alpha1.Gateway
 		namespacedName types.NamespacedName
 		gateway        []mcsv1alpha1.Gateway
 		resExport      *mcsv1alpha1.ResourceExport
 		expectedInfo   []mcsv1alpha1.GatewayInfo
+		expectedErr    string
 		isDelete       bool
 	}{
 		{
@@ -123,7 +96,6 @@ func TestGatewayReconciler(t *testing.T) {
 			gateway: []mcsv1alpha1.Gateway{
 				gwNode1,
 			},
-			resExport: existingResExport,
 			expectedInfo: []mcsv1alpha1.GatewayInfo{
 				{
 					GatewayIP: "10.10.10.10",
@@ -131,36 +103,16 @@ func TestGatewayReconciler(t *testing.T) {
 			},
 		},
 		{
-			name: "update a ResourceExport successfully by creating a new Gateway",
+			name: "error creating a ResourceExport when existing ResourceExport is being deleted",
 			namespacedName: types.NamespacedName{
 				Namespace: "default",
-				Name:      "node-2",
-			},
-			gateway: []mcsv1alpha1.Gateway{
-				gwNode1, gwNode2,
-			},
-			resExport: existingResExport,
-			expectedInfo: []mcsv1alpha1.GatewayInfo{
-				{
-					GatewayIP: "10.8.8.8",
-				},
-			},
-		},
-		{
-			name: "update a ResourceExport successfully by deleting a Gateway",
-			namespacedName: types.NamespacedName{
-				Namespace: "default",
-				Name:      "node-2",
+				Name:      "node-1",
 			},
 			gateway: []mcsv1alpha1.Gateway{
 				gwNode1,
 			},
-			resExport: existingResExport2,
-			expectedInfo: []mcsv1alpha1.GatewayInfo{
-				{
-					GatewayIP: "10.10.10.10",
-				},
-			},
+			resExport:   staleExistingResExport,
+			expectedErr: "resourceexports.multicluster.crd.antrea.io \"cluster-a-clusterinfo\" already exists",
 		},
 		{
 			name: "update a ResourceExport successfully by updating an existing Gateway",
@@ -200,39 +152,43 @@ func TestGatewayReconciler(t *testing.T) {
 		if tt.resExport != nil {
 			fakeRemoteClient = fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.resExport).Build()
 		}
-		commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, leaderNamespace)
-		mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default")
+		commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, leaderNamespace, nil)
+		mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default", false)
 		mcReconciler.SetRemoteCommonArea(commonArea)
 		commonAreaGatter := mcReconciler
-		r := NewGatewayReconciler(fakeClient, scheme, "default", "10.96.0.0/12", commonAreaGatter)
+		r := NewGatewayReconciler(fakeClient, scheme, "default", "10.96.0.0/12", []string{"10.200.1.1/16"}, commonAreaGatter)
 		t.Run(tt.name, func(t *testing.T) {
 			req := ctrl.Request{NamespacedName: tt.namespacedName}
 			if _, err := r.Reconcile(ctx, req); err != nil {
-				t.Errorf("Gateway Reconciler should handle ResourceExports events successfully but got error = %v", err)
+				if tt.expectedErr != "" {
+					assert.Equal(t, tt.expectedErr, err.Error())
+				} else {
+					t.Errorf("Gateway Reconciler should handle ResourceExports events successfully but got error = %v", err)
+				}
 			} else {
-				gws := &mcsv1alpha1.GatewayList{}
-				_ = fakeClient.List(ctx, gws, &client.ListOptions{})
-				fmt.Printf("output list: %v", gws)
 				ciExport := mcsv1alpha1.ResourceExport{}
 				ciExportName := types.NamespacedName{
 					Namespace: leaderNamespace,
 					Name:      newClusterInfoResourceExportName(localClusterID),
 				}
 				err := fakeRemoteClient.Get(ctx, ciExportName, &ciExport)
-				if err == nil {
-					if !reflect.DeepEqual(ciExport.Spec.ClusterInfo.GatewayInfos, tt.expectedInfo) {
-						t.Errorf("Expected GatewayInfos are %v but got %v", tt.expectedInfo, ciExport.Spec.ClusterInfo.GatewayInfos)
-					}
-				} else {
-					if tt.isDelete {
-						if !apierrors.IsNotFound(err) {
-							t.Errorf("Gateway Reconciler expects not found error but got error = %v", err)
-						}
-					} else {
-						t.Errorf("Expected a ClusterInfo kind of ResourceExport but got error = %v", err)
-					}
+				if tt.isDelete && !apierrors.IsNotFound(err) {
+					t.Errorf("Gateway Reconciler expects not found error but got error = %v", err)
+				}
+				if err == nil && !reflect.DeepEqual(ciExport.Spec.ClusterInfo.GatewayInfos, tt.expectedInfo) {
+					t.Errorf("Expected GatewayInfos are %v but got %v", tt.expectedInfo, ciExport.Spec.ClusterInfo.GatewayInfos)
+				}
+				if !tt.isDelete && apierrors.IsNotFound(err) {
+					t.Errorf("Expected a ClusterInfo kind of ResourceExport but got error = %v", err)
 				}
 			}
 		})
 	}
+}
+
+func TestGetServiceCIDR(t *testing.T) {
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects().Build()
+	r := NewGatewayReconciler(fakeClient, scheme, "default", "", []string{"10.200.1.1/16"}, nil)
+	err := r.getServiceCIDR(context.TODO())
+	assert.Contains(t, err.Error(), "expected a specific error but none was returned")
 }

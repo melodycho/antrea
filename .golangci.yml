@@ -19,13 +19,14 @@ linters-settings:
       - name: range
       - name: superfluous-else
       - name: var-declaration
+      - name: duplicated-imports
 
 linters:
   disable-all: true
   enable:
     - misspell
     - gofmt
-    - deadcode
+    - unused
     - staticcheck
     - gosec
     - goimports

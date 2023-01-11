@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package agent
 
 import (
 	componentbaseconfig "k8s.io/component-base/config"
@@ -33,12 +33,8 @@ type AgentConfig struct {
 	// Make sure it doesn't conflict with your existing OpenVSwitch bridges.
 	// Defaults to br-int.
 	OVSBridge string `yaml:"ovsBridge,omitempty"`
-	// Datapath type to use for the OpenVSwitch bridge created by Antrea. Supported values are:
-	// - system
-	// - netdev
-	// 'system' is the default value and corresponds to the kernel datapath. Use 'netdev' to run
-	// OVS in userspace mode (not fully supported yet). Userspace mode requires the tun device
-	// driver to be available.
+	// Datapath type to use for the OpenVSwitch bridge created by Antrea. At the moment, the only supported
+	// value is 'system', which corresponds to the kernel datapath.
 	OVSDatapathType string `yaml:"ovsDatapathType,omitempty"`
 	// Runtime data directory used by Open vSwitch.
 	// Default value:
@@ -75,6 +71,14 @@ type AgentConfig struct {
 	// If zero, it will use the assigned IANA port for the protocol, i.e. 6081 for Geneve, 4789 for VXLAN,
 	// and 7471 for STT.
 	TunnelPort int32 `yaml:"tunnelPort,omitempty"`
+	// TunnelCsum determines whether to compute UDP encapsulation header (Geneve or VXLAN) checksums on outgoing
+	// packets. For Linux kernel before Mar 2021, UDP checksum must be present to trigger GRO on the receiver for better
+	// performance of Geneve and VXLAN tunnels. The issue has been fixed by
+	// https://github.com/torvalds/linux/commit/89e5c58fc1e2857ccdaae506fb8bc5fed57ee063, thus computing UDP checksum is
+	// no longer necessary.
+	// Default is false. It should only be set to true when you are using an unpatched Linux kernel and observing poor
+	// transfer performance.
+	TunnelCsum bool `yaml:"tunnelCsum,omitempty"`
 	// Default MTU to use for the host gateway interface and the network interface of each Pod.
 	// If omitted, antrea-agent will discover the MTU of the Node's primary interface and
 	// also adjust MTU to accommodate for tunnel encapsulation overhead (if applicable).
@@ -210,6 +214,8 @@ type AgentConfig struct {
 	NodeType string `yaml:"nodeType,omitempty"`
 	// ExternalNode related configurations.
 	ExternalNode ExternalNodeConfig `yaml:"externalNode,omitempty"`
+	// Antrea's native secondary network configuration.
+	SecondaryNetwork SecondaryNetworkConfig `yaml:"secondaryNetwork,omitempty"`
 }
 
 type AntreaProxyConfig struct {
@@ -273,12 +279,17 @@ type IPsecConfig struct {
 }
 
 type MulticlusterConfig struct {
-	// Enable Multicluster which allow cross-cluster traffic between member clusters
-	// in a ClusterSet.
+	// Deprecated and replaced by "enableGateway". Keep the field in MulticlusterConfig to be
+	// compatible with earlier version (<= v1.10) Antrea deployment manifests.
 	Enable bool `yaml:"enable,omitempty"`
-	// The Namespace where the Antrea Multi-cluster controller is running.
+	// Enable Multi-cluster Gateway.
+	EnableGateway bool `yaml:"enableGateway,omitempty"`
+	// The Namespace where Antrea Multi-cluster Controller is running.
 	// The default is antrea-agent's Namespace.
 	Namespace string `yaml:"namespace,omitempty"`
+	// Enable StretchedNetworkPolicy which allows Antrea-native policies to select peers from
+	// other clusters in a ClusterSet.
+	EnableStretchedNetworkPolicy bool `yaml:"enableStretchedNetworkPolicy,omitempty"`
 }
 
 type ExternalNodeConfig struct {
@@ -302,4 +313,24 @@ type PolicyBypassRule struct {
 	CIDR string `json:"cidr,omitempty"`
 	// The destination port of the given protocol.
 	Port int `yaml:"port,omitempty"`
+}
+
+type SecondaryNetworkConfig struct {
+	// Secondary network specific OVS configuration.
+	OVS SecondaryNetworkOVSConfig `yaml:"ovs,omitempty"`
+	// TunnelType to be used for node to node transport, which is part of the same virtual network.
+	TunnelType string `yaml:"tunnelType,omitempty"`
+}
+
+type SecondaryNetworkOVSConfig struct {
+	// Enable Antrea's native secondary network OVS configuration.
+	Enable bool `yaml:"enable,omitempty"`
+	// OVS integration bridge name.
+	OVSIntegrationBridgeName string `yaml:"ovsIntegrationBridgeName,omitempty"`
+	// OVS transport bridge name.
+	OVSTransportBridgeName string `yaml:"ovsTransportBridgeName,omitempty"`
+	// OVS Datapath type to use for the OpenVSwitch bridge created by Antrea.
+	OVSDatapathType string `yaml:"ovsDatapathType,omitempty"`
+	// OVS patch port which connects the integration and transport bridge.
+	OVSPatchPort string `yaml:"ovsPatchPort,omitempty"`
 }

@@ -21,10 +21,13 @@ import (
 	admv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/component-base/featuregate"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 
 	crdv1alpha1 "antrea.io/antrea/pkg/apis/crd/v1alpha1"
 	crdv1alpha2 "antrea.io/antrea/pkg/apis/crd/v1alpha2"
 	crdv1alpha3 "antrea.io/antrea/pkg/apis/crd/v1alpha3"
+	"antrea.io/antrea/pkg/features"
 )
 
 func TestValidateAntreaPolicy(t *testing.T) {
@@ -34,6 +37,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 
 	tests := []struct {
 		name           string
+		featureGates   map[featuregate.Feature]bool
 		policy         *crdv1alpha1.ClusterNetworkPolicy
 		expectedReason string
 	}{
@@ -44,7 +48,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "non-existent-tier",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo": "bar"},
@@ -63,7 +67,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-static-tier",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo": "bar"},
@@ -82,7 +86,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-ingress-baseline-pass-action",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -113,7 +117,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-egress-baseline-pass-action",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -144,7 +148,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-egress-pass-action",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -175,7 +179,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-non-unique-rule-name",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -217,7 +221,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-both-spec-rule",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -234,7 +238,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+							AppliedTo: []crdv1alpha1.AppliedTo{
 								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{"foo3": "bar3"},
@@ -287,7 +291,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+							AppliedTo: []crdv1alpha1.AppliedTo{
 								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{"foo2": "bar2"},
@@ -329,7 +333,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+							AppliedTo: []crdv1alpha1.AppliedTo{
 								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{"foo2": "bar2"},
@@ -347,7 +351,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+							AppliedTo: []crdv1alpha1.AppliedTo{
 								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{"foo4": "bar4"},
@@ -368,7 +372,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-group-set-with-psel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -387,7 +391,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-group-set-with-nssel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -406,7 +410,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-group-alone",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							Group: "group1",
 						},
@@ -434,7 +438,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-set-with-psel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -465,7 +469,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-set-with-nssel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -496,7 +500,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-set-with-ipblock",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -527,7 +531,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-set-with-ns",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -558,7 +562,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-set-with-fqdn",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -587,7 +591,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-set-with-eesel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -618,7 +622,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-group-alone",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -646,7 +650,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-rule-ns-set-with-nssel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -679,7 +683,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-toservice-set-with-to",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -696,7 +700,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							ToServices: []crdv1alpha1.NamespacedName{
+							ToServices: []crdv1alpha1.PeerService{
 								{
 									Name:      "foo",
 									Namespace: "bar",
@@ -706,7 +710,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					},
 				},
 			},
-			expectedReason: "`toServices` can't be used with `to`, `ports` or `protocols`",
+			expectedReason: "`toServices` cannot be used with `to`, `ports` or `protocols`",
 		},
 		{
 			name: "acnp-toservice-set-with-ports",
@@ -715,7 +719,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-toservice-set-with-ports",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -730,7 +734,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									Port: &int80,
 								},
 							},
-							ToServices: []crdv1alpha1.NamespacedName{
+							ToServices: []crdv1alpha1.PeerService{
 								{
 									Name:      "foo",
 									Namespace: "bar",
@@ -740,7 +744,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					},
 				},
 			},
-			expectedReason: "`toServices` can't be used with `to`, `ports` or `protocols`",
+			expectedReason: "`toServices` cannot be used with `to`, `ports` or `protocols`",
 		},
 		{
 			name: "acnp-toservice-set-with-protocols",
@@ -749,7 +753,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-toservice-set-with-protocols",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -764,7 +768,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									ICMP: &crdv1alpha1.ICMPProtocol{},
 								},
 							},
-							ToServices: []crdv1alpha1.NamespacedName{
+							ToServices: []crdv1alpha1.PeerService{
 								{
 									Name:      "foo",
 									Namespace: "bar",
@@ -774,7 +778,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					},
 				},
 			},
-			expectedReason: "`toServices` can't be used with `to`, `ports` or `protocols`",
+			expectedReason: "`toServices` cannot be used with `to`, `ports` or `protocols`",
 		},
 		{
 			name: "acnp-toservice-alone",
@@ -783,7 +787,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-toservice-alone",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -793,7 +797,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Egress: []crdv1alpha1.Rule{
 						{
 							Action: &allowAction,
-							ToServices: []crdv1alpha1.NamespacedName{
+							ToServices: []crdv1alpha1.PeerService{
 								{
 									Name:      "foo",
 									Namespace: "bar",
@@ -812,7 +816,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-invalid-fqdn",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -840,7 +844,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-valid-fqdn",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -868,7 +872,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-endport-without-port-in-ports",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -896,7 +900,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-endport-smaller-port-in-ports",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -925,7 +929,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-named-port-with-endport-in-ports",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -954,7 +958,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-port-range-in-ports",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -983,7 +987,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-invalid-label-key-applied-to",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo=": "bar"},
@@ -1011,7 +1015,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+							AppliedTo: []crdv1alpha1.AppliedTo{
 								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{"foo1": "bar="},
@@ -1031,7 +1035,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-invalid-label-key-rule",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							NamespaceSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo": "bar"},
@@ -1061,7 +1065,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-service-set-with-psel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -1083,7 +1087,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-service-and-psel",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							PodSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"foo1": "bar1"},
@@ -1107,7 +1111,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 					Name: "acnp-appliedto-service-with-egress-rule",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							Service: &crdv1alpha1.NamespacedName{
 								Namespace: "foo1",
@@ -1148,7 +1152,7 @@ func TestValidateAntreaPolicy(t *testing.T) {
 									},
 								},
 							},
-							AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+							AppliedTo: []crdv1alpha1.AppliedTo{
 								{
 									Service: &crdv1alpha1.NamespacedName{
 										Namespace: "foo1",
@@ -1166,10 +1170,10 @@ func TestValidateAntreaPolicy(t *testing.T) {
 			name: "acnp-appliedto-service-from-psel",
 			policy: &crdv1alpha1.ClusterNetworkPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "egress-rule-appliedto-service",
+					Name: "ingress-rule-appliedto-service",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							Service: &crdv1alpha1.NamespacedName{
 								Namespace: "foo1",
@@ -1197,10 +1201,10 @@ func TestValidateAntreaPolicy(t *testing.T) {
 			name: "acnp-appliedto-service-valid",
 			policy: &crdv1alpha1.ClusterNetworkPolicy{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "egress-rule-appliedto-service",
+					Name: "ingress-rule-appliedto-service",
 				},
 				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
-					AppliedTo: []crdv1alpha1.NetworkPolicyPeer{
+					AppliedTo: []crdv1alpha1.AppliedTo{
 						{
 							Service: &crdv1alpha1.NamespacedName{
 								Namespace: "foo1",
@@ -1224,9 +1228,221 @@ func TestValidateAntreaPolicy(t *testing.T) {
 			},
 			expectedReason: "",
 		},
+		{
+			name:         "acnp-l7protocols-used-with-allow",
+			featureGates: map[featuregate.Feature]bool{features.L7NetworkPolicy: true},
+			policy: &crdv1alpha1.ClusterNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ingress-rule-l7protocols",
+				},
+				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
+					AppliedTo: []crdv1alpha1.AppliedTo{
+						{
+							Service: &crdv1alpha1.NamespacedName{
+								Namespace: "foo1",
+								Name:      "bar1",
+							},
+						},
+					},
+					Ingress: []crdv1alpha1.Rule{
+						{
+							Action: &allowAction,
+							L7Protocols: []crdv1alpha1.L7Protocol{
+								{
+									HTTP: &crdv1alpha1.HTTPProtocol{
+										Host:   "test.com",
+										Method: "GET",
+										Path:   "/admin",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedReason: "",
+		},
+		{
+			name:         "acnp-l7protocols-used-with-pass",
+			featureGates: map[featuregate.Feature]bool{features.L7NetworkPolicy: true},
+			policy: &crdv1alpha1.ClusterNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ingress-rule-l7protocols",
+				},
+				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
+					AppliedTo: []crdv1alpha1.AppliedTo{
+						{
+							Service: &crdv1alpha1.NamespacedName{
+								Namespace: "foo1",
+								Name:      "bar1",
+							},
+						},
+					},
+					Ingress: []crdv1alpha1.Rule{
+						{
+							Action: &passAction,
+							L7Protocols: []crdv1alpha1.L7Protocol{
+								{
+									HTTP: &crdv1alpha1.HTTPProtocol{
+										Host:   "test.com",
+										Method: "GET",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedReason: "layer 7 protocols only support Allow",
+		},
+		{
+			name:         "acnp-l7protocols-HTTP-used-with-UDP",
+			featureGates: map[featuregate.Feature]bool{features.L7NetworkPolicy: true},
+			policy: &crdv1alpha1.ClusterNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ingress-rule-l7protocols",
+				},
+				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
+					AppliedTo: []crdv1alpha1.AppliedTo{
+						{
+							Service: &crdv1alpha1.NamespacedName{
+								Namespace: "foo1",
+								Name:      "bar1",
+							},
+						},
+					},
+					Ingress: []crdv1alpha1.Rule{
+						{
+							Action: &allowAction,
+							Ports: []crdv1alpha1.NetworkPolicyPort{
+								{
+									Protocol: &k8sProtocolUDP,
+								},
+							},
+							L7Protocols: []crdv1alpha1.L7Protocol{
+								{
+									HTTP: &crdv1alpha1.HTTPProtocol{
+										Host:   "test.com",
+										Method: "GET",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedReason: "HTTP protocol can only be used when layer 4 protocol is TCP or unset",
+		},
+		{
+			name:         "acnp-l7protocols-HTTP-used-with-ICMP",
+			featureGates: map[featuregate.Feature]bool{features.L7NetworkPolicy: true},
+			policy: &crdv1alpha1.ClusterNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ingress-rule-l7protocols",
+				},
+				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
+					AppliedTo: []crdv1alpha1.AppliedTo{
+						{
+							Service: &crdv1alpha1.NamespacedName{
+								Namespace: "foo1",
+								Name:      "bar1",
+							},
+						},
+					},
+					Ingress: []crdv1alpha1.Rule{
+						{
+							Action: &allowAction,
+							Protocols: []crdv1alpha1.NetworkPolicyProtocol{
+								{
+									ICMP: &crdv1alpha1.ICMPProtocol{},
+								},
+							},
+							L7Protocols: []crdv1alpha1.L7Protocol{
+								{
+									HTTP: &crdv1alpha1.HTTPProtocol{
+										Host:   "test.com",
+										Method: "GET",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedReason: "HTTP protocol can not be used with protocol IGMP or ICMP",
+		},
+		{
+			name:         "acnp-l7protocols-used-with-toService",
+			featureGates: map[featuregate.Feature]bool{features.L7NetworkPolicy: true},
+			policy: &crdv1alpha1.ClusterNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "egress-rule-l7protocols",
+				},
+				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
+					AppliedTo: []crdv1alpha1.AppliedTo{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"foo1": "bar1"},
+							},
+						},
+					},
+					Egress: []crdv1alpha1.Rule{
+						{
+							Action: &allowAction,
+							L7Protocols: []crdv1alpha1.L7Protocol{
+								{
+									HTTP: &crdv1alpha1.HTTPProtocol{
+										Host:   "test.com",
+										Method: "GET",
+									},
+								},
+							},
+							ToServices: []crdv1alpha1.PeerService{
+								{
+									Name:      "foo",
+									Namespace: "bar",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedReason: "layer 7 protocols can not be used with toServices",
+		},
+		{
+			name:         "L7NetworkPolicy-disabled",
+			featureGates: map[featuregate.Feature]bool{features.L7NetworkPolicy: false},
+			policy: &crdv1alpha1.ClusterNetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "egress-rule-l7protocols",
+				},
+				Spec: crdv1alpha1.ClusterNetworkPolicySpec{
+					AppliedTo: []crdv1alpha1.AppliedTo{
+						{
+							NamespaceSelector: &metav1.LabelSelector{},
+						},
+					},
+					Egress: []crdv1alpha1.Rule{
+						{
+							Action: &allowAction,
+							L7Protocols: []crdv1alpha1.L7Protocol{
+								{
+									HTTP: nil,
+								},
+							},
+						},
+					},
+				},
+			},
+			expectedReason: "layer 7 protocols can only be used when L7NetworkPolicy is enabled",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			for feature, value := range tt.featureGates {
+				defer featuregatetesting.SetFeatureGateDuringTest(t, features.DefaultFeatureGate, feature, value)()
+			}
+
 			_, c := newController()
 			v := NewNetworkPolicyValidator(c.NetworkPolicyController)
 			actualReason, allowed := v.validateAntreaPolicy(tt.policy, nil, admv1.Create, authenticationv1.UserInfo{})

@@ -26,12 +26,15 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/apis/controlplane/v1beta2"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
+	"antrea.io/antrea/pkg/apis/crd/v1alpha2"
 	"antrea.io/antrea/pkg/features"
 	"antrea.io/antrea/pkg/util/k8s"
 )
@@ -77,6 +80,13 @@ func TestTraceflow(t *testing.T) {
 		skipIfEncapModeIsNot(t, data, config.TrafficEncapModeEncap)
 		testTraceflowExternalIP(t, data)
 	})
+	t.Run("testTraceflowEgress", func(t *testing.T) {
+		skipIfHasWindowsNodes(t)
+		skipIfEncapModeIsNot(t, data, config.TrafficEncapModeEncap)
+		skipIfAntreaIPAMTest(t)
+		skipIfEgressDisabled(t)
+		testTraceflowEgress(t, data)
+	})
 }
 
 func skipIfTraceflowDisabled(t *testing.T) {
@@ -103,6 +113,9 @@ func testTraceflowIntraNodeANP(t *testing.T, data *TestData) {
 	node1 := nodeName(nodeIdx)
 	node1Pods, _, node1CleanupFn := createTestAgnhostPods(t, data, 3, data.testNamespace, node1)
 	defer node1CleanupFn()
+	// Give a little time for Windows Containerd Nodes to setup OVS.
+	// Containerd configures port asynchronously, which could cause execution time of installing flow longer than docker.
+	time.Sleep(time.Second * 1)
 
 	var denyIngress *v1alpha1.NetworkPolicy
 	denyIngressName := "test-anp-deny-ingress"
@@ -300,6 +313,9 @@ func testTraceflowIntraNode(t *testing.T, data *TestData) {
 	agentPod, _ := data.getAntreaPodOnNode(node1)
 	node1Pods, node1IPs, node1CleanupFn := createTestAgnhostPods(t, data, 3, data.testNamespace, node1)
 	defer node1CleanupFn()
+	// Give a little time for Windows Containerd Nodes to setup OVS.
+	// Containerd configures port asynchronously, which could cause execution time of installing flow longer than docker.
+	time.Sleep(time.Second * 1)
 	var pod0IPv4Str, pod1IPv4Str, dstPodIPv4Str, dstPodIPv6Str string
 	if node1IPs[0].ipv4 != nil {
 		pod0IPv4Str = node1IPs[0].ipv4.String()
@@ -2012,6 +2028,9 @@ func testTraceflowExternalIP(t *testing.T, data *TestData) {
 	nodeIP := nodeIP(nodeIdx)
 	podNames, _, cleanupFn := createTestAgnhostPods(t, data, 1, data.testNamespace, node)
 	defer cleanupFn()
+	// Give a little time for Windows Containerd Nodes to setup OVS.
+	// Containerd configures port asynchronously, which could cause execution time of installing flow longer than docker.
+	time.Sleep(time.Second * 1)
 
 	testcase := testcase{
 		name:      "nodeIPDestination",
@@ -2057,6 +2076,167 @@ func testTraceflowExternalIP(t *testing.T, data *TestData) {
 	runTestTraceflow(t, data, testcase)
 }
 
+func testTraceflowEgress(t *testing.T, data *TestData) {
+	egressNode := nodeName(0)
+	egressIP := nodeIP(0)
+	externalDstIP := "1.1.1.1"
+
+	localPodNames, _, localCleanupFn := createTestAgnhostPods(t, data, 1, data.testNamespace, egressNode)
+	defer localCleanupFn()
+
+	matchExpressions := []metav1.LabelSelectorRequirement{
+		{
+			Key:      "antrea-e2e",
+			Operator: metav1.LabelSelectorOpIn,
+			Values:   []string{localPodNames[0]},
+		},
+	}
+
+	egress := data.createEgress(t, "egress-", matchExpressions, nil, "", egressIP)
+	defer data.crdClient.CrdV1alpha2().Egresses().Delete(context.TODO(), egress.Name, metav1.DeleteOptions{})
+
+	testcaseLocalEgress := testcase{
+		name:      "egressFromLocalNode",
+		ipVersion: 4,
+		tf: &v1alpha1.Traceflow{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: randName(fmt.Sprintf("%s-%s-to-%s-%s-", data.testNamespace, localPodNames[0], data.testNamespace, strings.ReplaceAll(externalDstIP, ":", "--"))),
+			},
+			Spec: v1alpha1.TraceflowSpec{
+				Source: v1alpha1.Source{
+					Namespace: data.testNamespace,
+					Pod:       localPodNames[0],
+				},
+				Destination: v1alpha1.Destination{
+					IP: externalDstIP,
+				},
+				Packet: v1alpha1.Packet{
+					IPHeader: v1alpha1.IPHeader{
+						Protocol: protocolICMP,
+					},
+				},
+			},
+		},
+		expectedPhase: v1alpha1.Succeeded,
+		expectedResults: []v1alpha1.NodeResult{
+			{
+				Node: egressNode,
+				Observations: []v1alpha1.Observation{
+					{
+						Component: v1alpha1.ComponentSpoofGuard,
+						Action:    v1alpha1.ActionForwarded,
+					},
+					{
+						Component: v1alpha1.ComponentEgress,
+						Action:    v1alpha1.ActionMarkedForSNAT,
+						Egress:    egress.Name,
+						EgressIP:  egressIP,
+					},
+					{
+						Component:     v1alpha1.ComponentForwarding,
+						ComponentInfo: "Output",
+						Action:        v1alpha1.ActionForwardedOutOfOverlay,
+					},
+				},
+			},
+		},
+	}
+
+	t.Run(testcaseLocalEgress.name, func(t *testing.T) {
+		runTestTraceflow(t, data, testcaseLocalEgress)
+	})
+
+	skipIfNumNodesLessThan(t, 2)
+	remoteNode := nodeName(1)
+	remotePodNames, _, remoteCleanupFn := createTestAgnhostPods(t, data, 1, data.testNamespace, remoteNode)
+	defer remoteCleanupFn()
+
+	toUpdate := egress.DeepCopy()
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		toUpdate.Spec.AppliedTo = v1alpha2.AppliedTo{
+			PodSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"antrea-e2e": remotePodNames[0]},
+			},
+		}
+		_, err := data.crdClient.CrdV1alpha2().Egresses().Update(context.TODO(), toUpdate, metav1.UpdateOptions{})
+		if err != nil && errors.IsConflict(err) {
+			toUpdate, _ = data.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{})
+		}
+		return err
+	})
+	require.NoError(t, err, "Failed to update Egress")
+
+	testcaseRemoteEgress := testcase{
+		name:      "egressFromRemoteNode",
+		ipVersion: 4,
+		tf: &v1alpha1.Traceflow{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: randName(fmt.Sprintf("%s-%s-to-%s-%s-", data.testNamespace, remotePodNames[0], data.testNamespace, strings.ReplaceAll(externalDstIP, ":", "--"))),
+			},
+			Spec: v1alpha1.TraceflowSpec{
+				Source: v1alpha1.Source{
+					Namespace: data.testNamespace,
+					Pod:       remotePodNames[0],
+				},
+				Destination: v1alpha1.Destination{
+					IP: externalDstIP,
+				},
+				Packet: v1alpha1.Packet{
+					IPHeader: v1alpha1.IPHeader{
+						Protocol: protocolICMP,
+					},
+				},
+			},
+		},
+		expectedPhase: v1alpha1.Succeeded,
+		expectedResults: []v1alpha1.NodeResult{
+			{
+				Node: remoteNode,
+				Observations: []v1alpha1.Observation{
+					{
+						Component: v1alpha1.ComponentSpoofGuard,
+						Action:    v1alpha1.ActionForwarded,
+					},
+					{
+						Component: v1alpha1.ComponentEgress,
+						Action:    v1alpha1.ActionForwardedToEgressNode,
+						Egress:    egress.Name,
+						EgressIP:  egressIP,
+					},
+					{
+						Component:     v1alpha1.ComponentForwarding,
+						ComponentInfo: "Output",
+						Action:        v1alpha1.ActionForwarded,
+					},
+				},
+			},
+			{
+				Node: egressNode,
+				Observations: []v1alpha1.Observation{
+					{
+						Component: v1alpha1.ComponentForwarding,
+						Action:    v1alpha1.ActionReceived,
+					},
+					{
+						Component: v1alpha1.ComponentEgress,
+						Action:    v1alpha1.ActionMarkedForSNAT,
+						EgressIP:  egressIP,
+					},
+					{
+						Component:     v1alpha1.ComponentForwarding,
+						ComponentInfo: "Output",
+						Action:        v1alpha1.ActionForwardedOutOfOverlay,
+					},
+				},
+			},
+		},
+	}
+
+	t.Run(testcaseRemoteEgress.name, func(t *testing.T) {
+		runTestTraceflow(t, data, testcaseRemoteEgress)
+	})
+}
+
 func (data *TestData) waitForTraceflow(t *testing.T, name string, phase v1alpha1.TraceflowPhase) (*v1alpha1.Traceflow, error) {
 	var tf *v1alpha1.Traceflow
 	var err error
@@ -2091,6 +2271,8 @@ func compareObservations(expected v1alpha1.NodeResult, actual v1alpha1.NodeResul
 			exObs[i].ComponentInfo != acObs[i].ComponentInfo ||
 			exObs[i].Pod != acObs[i].Pod ||
 			exObs[i].TranslatedDstIP != acObs[i].TranslatedDstIP ||
+			exObs[i].EgressIP != acObs[i].EgressIP ||
+			exObs[i].Egress != acObs[i].Egress ||
 			exObs[i].Action != acObs[i].Action {
 			return fmt.Errorf("Observations should be %v, but got %v", exObs, acObs)
 		}
@@ -2114,7 +2296,7 @@ func (data *TestData) createANPDenyIngress(key string, value string, name string
 		Spec: v1alpha1.NetworkPolicySpec{
 			Tier:     defaultTierName,
 			Priority: 250,
-			AppliedTo: []v1alpha1.NetworkPolicyPeer{
+			AppliedTo: []v1alpha1.AppliedTo{
 				{
 					PodSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{

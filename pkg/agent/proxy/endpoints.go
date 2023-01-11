@@ -73,8 +73,10 @@ func newEndpointsChangesTracker(hostname string, enableEndpointSlice bool, isIPv
 // For example,
 // Add item
 //   - pass <nil, Endpoints> as the <previous, current> pair.
+//
 // Update item
 //   - pass <oldEndpoints, Endpoints> as the <previous, current> pair.
+//
 // Delete item
 //   - pass <Endpoints, nil> as the <previous, current> pair.
 func (t *endpointsChangesTracker) OnEndpointUpdate(previous, current *corev1.Endpoints) bool {
@@ -200,6 +202,7 @@ func (t *endpointsChangesTracker) endpointsToEndpointsMap(endpoints *corev1.Endp
 				ei := types.NewEndpointInfo(&k8sproxy.BaseEndpointInfo{
 					Endpoint: net.JoinHostPort(addr.IP, fmt.Sprint(port.Port)),
 					IsLocal:  isLocal,
+					Ready:    true,
 				})
 				endpointsMap[svcPortName][ei.String()] = ei
 			}
@@ -208,27 +211,20 @@ func (t *endpointsChangesTracker) endpointsToEndpointsMap(endpoints *corev1.Endp
 	return endpointsMap
 }
 
-// Update updates an EndpointsMap based on current changes.
-func (t *endpointsChangesTracker) Update(em types.EndpointsMap) {
+// Update updates an EndpointsMap and numLocalEndpoints based on current changes.
+func (t *endpointsChangesTracker) Update(em types.EndpointsMap, numLocalEndpoints map[apimachinerytypes.NamespacedName]int) {
 	for _, change := range t.checkoutChanges() {
 		for spn := range change.previous {
 			delete(em, spn)
+			delete(numLocalEndpoints, spn.NamespacedName)
 		}
 		for spn, endpoints := range change.current {
 			em[spn] = endpoints
+			for _, endpoint := range endpoints {
+				if endpoint.GetIsLocal() && endpoint.IsReady() {
+					numLocalEndpoints[spn.NamespacedName] += 1
+				}
+			}
 		}
 	}
-}
-
-// byEndpoint helps sort Endpoint
-type byEndpoint []k8sproxy.Endpoint
-
-func (p byEndpoint) Len() int {
-	return len(p)
-}
-func (p byEndpoint) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-}
-func (p byEndpoint) Less(i, j int) bool {
-	return p[i].String() < p[j].String()
 }

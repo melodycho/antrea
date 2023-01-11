@@ -258,6 +258,8 @@ type NetworkPolicyRule struct {
 	// Cannot be set in conjunction with NetworkPolicy.AppliedToGroups of the NetworkPolicy
 	// that this Rule is referred to.
 	AppliedToGroups []string
+	// L7Protocols is a list of application layer protocols which should be matched.
+	L7Protocols []L7Protocol
 }
 
 // Protocol defines network protocols supported for things like container ports.
@@ -301,8 +303,27 @@ type Service struct {
 	GroupAddress string
 }
 
+// L7Protocol defines application layer protocol to match.
+type L7Protocol struct {
+	HTTP *HTTPProtocol
+}
+
+// HTTPProtocol matches HTTP requests with specific host, method, and path. All
+// fields could be used alone or together. If all fields are not provided, this
+// matches all HTTP requests.
+type HTTPProtocol struct {
+	// Host represents the hostname present in the URI or the HTTP Host header to match.
+	// It does not contain the port associated with the host.
+	Host string
+	// Method represents the HTTP method to match.
+	// It could be GET, POST, PUT, HEAD, DELETE, TRACE, OPTIONS, CONNECT and PATCH.
+	Method string
+	// Path represents the URI path to match (Ex. "/index.html", "/admin").
+	Path string
+}
+
 // NetworkPolicyPeer describes a peer of NetworkPolicyRules.
-// It could be a list of names of AddressGroups and/or a list of IPBlock.
+// It could contain one of the subfields or a combination of them.
 type NetworkPolicyPeer struct {
 	// A list of names of AddressGroups.
 	AddressGroups []string
@@ -314,6 +335,9 @@ type NetworkPolicyPeer struct {
 	// A list of ServiceReference.
 	// This field can only be possibly set for NetworkPolicyPeer of egress rules.
 	ToServices []ServiceReference
+	// A list of labelIdentities selected as ingress peers for stretched policy.
+	// This field can only be possibly set for NetworkPolicyPeer of ingress rules.
+	LabelIdentities []uint32
 }
 
 // IPBlock describes a particular CIDR (Ex. "192.168.1.1/24"). The except entry describes CIDRs that should
@@ -387,6 +411,10 @@ type NetworkPolicyNodeStatus struct {
 	NodeName string
 	// The generation realized by the Node.
 	Generation int64
+	// The flag to mark the NetworkPolicy realization is failed on the Node or not.
+	RealizationFailure bool
+	// The error message to describe why the NetworkPolicy realization is failed on the Node.
+	Message string
 }
 
 type GroupReference struct {
@@ -435,4 +463,73 @@ type EgressGroupList struct {
 	metav1.TypeMeta
 	metav1.ListMeta
 	Items []EgressGroup
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type SupportBundleCollection struct {
+	metav1.TypeMeta
+	metav1.ObjectMeta
+	ExpiredAt      metav1.Time
+	SinceTime      string
+	FileServer     BundleFileServer
+	Authentication BundleServerAuthConfiguration
+}
+
+// BundleFileServer specifies the bundle file server information.
+type BundleFileServer struct {
+	// The URL of the bundle file server. It is set with format: scheme://host[:port][/path],
+	// e.g, https://api.example.com:8443/v1/supportbundles/. If scheme is not set, https is used by default.
+	URL string
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// SupportBundleCollectionList is a list of SupportBundleCollection objects.
+type SupportBundleCollectionList struct {
+	metav1.TypeMeta
+	metav1.ListMeta
+	Items []SupportBundleCollection
+}
+
+type BasicAuthentication struct {
+	Username string
+	Password string
+}
+
+type BundleServerAuthConfiguration struct {
+	BearerToken         string
+	APIKey              string
+	BasicAuthentication *BasicAuthentication
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// SupportBundleCollectionStatus is the status of a SupportBundleCollection.
+type SupportBundleCollectionStatus struct {
+	metav1.TypeMeta
+	metav1.ObjectMeta
+	// Nodes contains statuses produced on a list of Nodes.
+	Nodes []SupportBundleCollectionNodeStatus
+}
+
+type SupportBundleCollectionNodeType string
+
+const (
+	SupportBundleCollectionNodeTypeNode         SupportBundleCollectionNodeType = "Node"
+	SupportBundleCollectionNodeTypeExternalNode SupportBundleCollectionNodeType = "ExternalNode"
+)
+
+// SupportBundleCollectionNodeStatus is the status of a SupportBundleCollection on a Node.
+type SupportBundleCollectionNodeStatus struct {
+	// The name of the Node that produces the status.
+	NodeName string
+	// The Namespace of the Node produces the status. It is set only when NodeType is externalNode
+	NodeNamespace string
+	// The type of the Node that produces the status. The supported values are "Node" and "ExternalNode".
+	NodeType SupportBundleCollectionNodeType
+	// Completed shows if the SupportBundleCollection is successfully processed on the Node or ExternalNode or not.
+	Completed bool
+	// Error is the reason for which the SupportBundleCollection is failed on the Node.
+	Error string
 }
