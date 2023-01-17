@@ -84,10 +84,19 @@ spec:
                 - format: ipv6
               externalIPPool:
                 type: string
+              secondaryEgressIP:
+                type: string
+                oneOf:
+                - format: ipv4
+                - format: ipv6
+              secondaryExternalIPPool:
+                type: string
           status:
             type: object
             properties:
               egressNode:
+                type: string
+              egressIP:
                 type: string
     additionalPrinterColumns:
     - description: Specifies the SNAT IP address for the selected workloads.
@@ -100,6 +109,10 @@ spec:
     - description: The Owner Node of egress IP
       jsonPath: .status.egressNode
       name: Node
+      type: string
+    - description: The active egress IP
+      jsonPath: .status.egressIP
+      name: ActiveEgressIP
       type: string
     subresources:
       status: {}

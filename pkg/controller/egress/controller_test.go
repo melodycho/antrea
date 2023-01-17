@@ -160,10 +160,11 @@ func newController(objects, crdObjects []runtime.Object) *egressController {
 
 func TestAddEgress(t *testing.T) {
 	tests := []struct {
-		name                 string
-		inputEgress          *v1alpha2.Egress
-		expectedEgressIP     string
-		expectedEgressGroups map[string]*controlplane.EgressGroup
+		name                      string
+		inputEgress               *v1alpha2.Egress
+		expectedEgressIP          string
+		expectedSecondaryEgressIP string
+		expectedEgressGroups      map[string]*controlplane.EgressGroup
 	}{
 		{
 			name: "Egress with podSelector and namespaceSelector",
@@ -296,6 +297,42 @@ func TestAddEgress(t *testing.T) {
 				node3: nil,
 			},
 		},
+		{
+			name: "Egress with secondaryExternalIPPool",
+			inputEgress: &v1alpha2.Egress{
+				ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+				Spec: v1alpha2.EgressSpec{
+					AppliedTo: v1alpha2.AppliedTo{
+						PodSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "foo"},
+						},
+					},
+					EgressIP:                "",
+					ExternalIPPool:          eipFoo1.Name,
+					SecondaryEgressIP:       "",
+					SecondaryExternalIPPool: eipFoo2.Name,
+				},
+			},
+			expectedEgressIP:          "1.1.1.1",
+			expectedSecondaryEgressIP: "2.2.2.10",
+			expectedEgressGroups: map[string]*controlplane.EgressGroup{
+				node1: {
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					GroupMembers: []controlplane.GroupMember{
+						{Pod: &controlplane.PodReference{Name: podFoo1.Name, Namespace: podFoo1.Namespace}},
+						{Pod: &controlplane.PodReference{Name: podFoo1InOtherNamespace.Name, Namespace: podFoo1InOtherNamespace.Namespace}},
+						{Pod: &controlplane.PodReference{Name: podNonIP.Name, Namespace: podNonIP.Namespace}},
+					},
+				},
+				node2: {
+					ObjectMeta: metav1.ObjectMeta{Name: "egressA", UID: "uidA"},
+					GroupMembers: []controlplane.GroupMember{
+						{Pod: &controlplane.PodReference{Name: podFoo2.Name, Namespace: podFoo2.Namespace}},
+					},
+				},
+				node3: nil,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -306,6 +343,7 @@ func TestAddEgress(t *testing.T) {
 			fakeObjects = append(fakeObjects, podFoo1, podFoo2, podBar1, podFoo1InOtherNamespace, podUnscheduled, podNonIP, podWithHostNetwork)
 			var fakeCRDObjects []runtime.Object
 			fakeCRDObjects = append(fakeCRDObjects, eipFoo1)
+			fakeCRDObjects = append(fakeCRDObjects, eipFoo2)
 			controller := newController(fakeObjects, fakeCRDObjects)
 			controller.informerFactory.Start(stopCh)
 			controller.crdInformerFactory.Start(stopCh)
@@ -349,6 +387,7 @@ func TestAddEgress(t *testing.T) {
 			gotEgress, err := controller.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), tt.inputEgress.Name, metav1.GetOptions{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedEgressIP, gotEgress.Spec.EgressIP)
+			assert.Equal(t, tt.expectedSecondaryEgressIP, gotEgress.Spec.SecondaryEgressIP)
 			if gotEgress.Spec.ExternalIPPool != "" && gotEgress.Spec.EgressIP != "" {
 				checkExternalIPPoolUsed(t, controller, gotEgress.Spec.ExternalIPPool, 1)
 			}

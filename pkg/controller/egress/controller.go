@@ -261,6 +261,20 @@ func (c *EgressController) syncEgressIP(egress *egressv1alpha2.Egress) (net.IP, 
 		return nil, fmt.Errorf("ExternalIPPool %s not exists", egress.Spec.ExternalIPPool)
 	}
 
+	if egress.Spec.SecondaryExternalIPPool != "" {
+		ip, err := c.externalIPAllocator.AllocateIPFromPool(egress.Spec.SecondaryExternalIPPool)
+		if err != nil {
+			return nil, err
+		}
+		if err = c.updateSecondaryEgressIP(egress, ip.String()); err != nil {
+			if rerr := c.externalIPAllocator.ReleaseIP(egress.Spec.SecondaryExternalIPPool, ip); rerr != nil &&
+				rerr != externalippool.ErrExternalIPPoolNotFound {
+				klog.ErrorS(rerr, "Failed to release IP", "ip", ip, "pool", egress.Spec.ExternalIPPool)
+			}
+			return nil, err
+		}
+	}
+
 	var ip net.IP
 	// User specifies the Egress IP, try to allocate it. If it fails, the datapath may still work, we just don't track
 	// the IP allocation so deleting this Egress won't release the IP to the Pool.
@@ -303,6 +317,24 @@ func (c *EgressController) updateEgressIP(egress *egressv1alpha2.Egress, ip stri
 	patchBytes, _ := json.Marshal(patch)
 	if _, err := c.crdClient.CrdV1alpha2().Egresses().Patch(context.TODO(), egress.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}); err != nil {
 		return fmt.Errorf("error when updating EgressIP for Egress %s: %v", egress.Name, err)
+	}
+	return nil
+}
+
+// updateEgressIP updates the Egress's EgressIP in Kubernetes API.
+func (c *EgressController) updateSecondaryEgressIP(egress *egressv1alpha2.Egress, ip string) error {
+	var egressIPPtr *string
+	if len(ip) > 0 {
+		egressIPPtr = &ip
+	}
+	patch := map[string]interface{}{
+		"spec": map[string]*string{
+			"secondaryEgressIP": egressIPPtr,
+		},
+	}
+	patchBytes, _ := json.Marshal(patch)
+	if _, err := c.crdClient.CrdV1alpha2().Egresses().Patch(context.TODO(), egress.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("error when updating secondaryEgressIP for Egress %s: %v", egress.Name, err)
 	}
 	return nil
 }

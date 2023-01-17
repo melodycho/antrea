@@ -506,7 +506,8 @@ func (c *Cluster) AliveNodes() sets.String {
 // ExternalIPPool. The local Node in the cluster holds the same consistent hash ring for each ExternalIPPool,
 // consistentHash.Get gets the closest item (Node name) in the hash to the provided key (IP), if the name of
 // the local Node is equal to the name of the selected Node, returns true.
-func (c *Cluster) ShouldSelectIP(ip, externalIPPool string, filters ...func(string) bool) (bool, error) {
+// filters？
+func (c *Cluster) ShouldSelectIP(ip, externalIPPool string) (bool, error) {
 	if externalIPPool == "" || ip == "" {
 		return false, nil
 	}
@@ -516,8 +517,8 @@ func (c *Cluster) ShouldSelectIP(ip, externalIPPool string, filters ...func(stri
 	if !ok {
 		return false, fmt.Errorf("local Node consistentHashMap has not synced, ExternalIPPool %s", externalIPPool)
 	}
-	node := consistentHash.GetWithFilters(ip, filters...)
-	if node == "" && len(filters) > 0 {
+	node := consistentHash.GetWithFilters(ip)
+	if node == "" {
 		return false, ErrNoNodeAvailable
 	}
 	return node == c.nodeName, nil

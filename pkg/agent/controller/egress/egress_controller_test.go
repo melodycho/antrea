@@ -825,7 +825,8 @@ func TestUpdateEgressStatus(t *testing.T) {
 			c := &EgressController{crdClient: fakeClient, nodeName: fakeNode}
 			_, err := c.crdClient.CrdV1alpha2().Egresses().Create(context.TODO(), &egress, metav1.CreateOptions{})
 			assert.NoError(t, err)
-			err = c.updateEgressStatus(&egress, true)
+			//
+			err = c.updateEgressStatus(&egress, true, egress.Spec.EgressIP)
 			if err != tt.expectedError {
 				t.Errorf("Update Egress error not match, got: %v, expected: %v", err, tt.expectedError)
 			}

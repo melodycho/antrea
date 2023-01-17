@@ -555,13 +555,14 @@ func (c *EgressController) unbindPodEgress(pod, egress string) (string, bool) {
 	return "", false
 }
 
-func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bool) error {
+func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bool, activeEgressIP string) error {
+	klog.InfoS("Updating Egress status", "isLocal", isLocal, "activeEgressIP", activeEgressIP)
 	toUpdate := egress.DeepCopy()
 	var updateErr, getErr error
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if isLocal {
 			// Do nothing if the current EgressNode in status is already this Node.
-			if toUpdate.Status.EgressNode == c.nodeName {
+			if toUpdate.Status.EgressNode == c.nodeName && toUpdate.Status.EgressIP == activeEgressIP {
 				return nil
 			}
 			toUpdate.Status.EgressNode = c.nodeName
@@ -572,7 +573,10 @@ func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bo
 			}
 			toUpdate.Status.EgressNode = ""
 		}
-		klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name, "oldNode", egress.Status.EgressNode, "newNode", toUpdate.Status.EgressNode)
+		toUpdate.Status.EgressIP = activeEgressIP
+		klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name,
+			"oldNode", egress.Status.EgressNode, "newNode", toUpdate.Status.EgressNode,
+			"oldEgressIP", egress.Status.EgressIP, "newEgressIP", toUpdate.Status.EgressIP)
 		_, updateErr = c.crdClient.CrdV1alpha2().Egresses().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
 		if updateErr != nil && errors.IsConflict(updateErr) {
 			if toUpdate, getErr = c.crdClient.CrdV1alpha2().Egresses().Get(context.TODO(), egress.Name, metav1.GetOptions{}); getErr != nil {
@@ -614,7 +618,7 @@ func (c *EgressController) syncEgress(egressName string) error {
 
 	eState, exist := c.getEgressState(egressName)
 	// If the EgressIP changes, uninstalls this Egress first.
-	if exist && eState.egressIP != egress.Spec.EgressIP {
+	if exist && eState.egressIP != egress.Spec.EgressIP && eState.egressIP != egress.Spec.SecondaryEgressIP {
 		if err := c.uninstallEgress(egressName, eState); err != nil {
 			return err
 		}
@@ -624,28 +628,38 @@ func (c *EgressController) syncEgress(egressName string) error {
 	if egress.Spec.EgressIP == "" {
 		return nil
 	}
-	if !exist {
-		eState = c.newEgressState(egressName, egress.Spec.EgressIP)
-	}
 
-	localNodeSelected, err := c.cluster.ShouldSelectIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool)
+	activeEgressIP := egress.Spec.EgressIP
+	localNodeSelected, err := c.cluster.ShouldSelectIP(activeEgressIP, egress.Spec.ExternalIPPool)
+	if err == memberlist.ErrNoNodeAvailable {
+		activeEgressIP = egress.Spec.SecondaryEgressIP
+		if activeEgressIP == "" {
+			klog.Warningf("There is no available Node for main Egress and not assign secondary EgressIP, %v", err)
+			return nil
+		}
+		localNodeSelected, err = c.cluster.ShouldSelectIP(activeEgressIP, egress.Spec.SecondaryExternalIPPool)
+	}
 	if err != nil {
 		return err
 	}
+	if !exist {
+		eState = c.newEgressState(egressName, activeEgressIP)
+	}
 	if localNodeSelected {
 		// Ensure the Egress IP is assigned to the system.
-		if err := c.ipAssigner.AssignIP(egress.Spec.EgressIP); err != nil {
+		if err := c.ipAssigner.AssignIP(activeEgressIP); err != nil {
 			return err
 		}
 	} else {
 		// Unassign the Egress IP from the local Node if it was assigned by the agent.
-		if err := c.ipAssigner.UnassignIP(egress.Spec.EgressIP); err != nil {
+		// TODO
+		if err := c.ipAssigner.UnassignIP(activeEgressIP); err != nil {
 			return err
 		}
 	}
 
 	// Realize the latest EgressIP and get the desired mark.
-	mark, err := c.realizeEgressIP(egressName, egress.Spec.EgressIP)
+	mark, err := c.realizeEgressIP(egressName, activeEgressIP)
 	if err != nil {
 		return err
 	}
@@ -660,7 +674,7 @@ func (c *EgressController) syncEgress(egressName string) error {
 		eState.mark = mark
 	}
 
-	if err := c.updateEgressStatus(egress, c.localIPDetector.IsLocalIP(egress.Spec.EgressIP)); err != nil {
+	if err := c.updateEgressStatus(egress, c.localIPDetector.IsLocalIP(activeEgressIP), activeEgressIP); err != nil {
 		return fmt.Errorf("update Egress %s status error: %v", egressName, err)
 	}
 
