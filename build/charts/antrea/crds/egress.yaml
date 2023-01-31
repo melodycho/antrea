@@ -99,10 +99,6 @@ spec:
               egressIP:
                 type: string
     additionalPrinterColumns:
-    - description: Specifies the SNAT IP address for the selected workloads.
-      jsonPath: .spec.egressIP
-      name: EgressIP
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -110,9 +106,9 @@ spec:
       jsonPath: .status.egressNode
       name: Node
       type: string
-    - description: The active egress IP
+    - description: The egressIP specifies the SNAT IP address for the selected workloads.
       jsonPath: .status.egressIP
-      name: ActiveEgressIP
+      name: EgressIP
       type: string
     subresources:
       status: {}
