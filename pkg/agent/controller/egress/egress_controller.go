@@ -197,7 +197,16 @@ func NewEgressController(
 				if !ok {
 					return nil, fmt.Errorf("obj is not Egress: %+v", obj)
 				}
-				return []string{egress.Spec.EgressIP}, nil
+				var egressIPs []string
+				if egress.Spec.EgressIP != "" {
+					egressIPs = append(egressIPs, egress.Spec.EgressIP)
+				}
+				for _, egressIP := range egress.Spec.EgressIPs {
+					if egressIP != "" {
+						egressIPs = append(egressIPs, egressIP)
+					}
+				}
+				return egressIPs, nil
 			},
 			// externalIPPoolIndex will be used to get all Egresses associated with a given ExternalIPPool.
 			externalIPPoolIndex: func(obj interface{}) (strings []string, e error) {
@@ -205,10 +214,16 @@ func NewEgressController(
 				if !ok {
 					return nil, fmt.Errorf("obj is not Egress: %+v", obj)
 				}
-				if egress.Spec.ExternalIPPool == "" {
-					return nil, nil
+				var externalIPPools []string
+				if egress.Spec.ExternalIPPool != "" {
+					externalIPPools = append(externalIPPools, egress.Spec.ExternalIPPool)
 				}
-				return []string{egress.Spec.ExternalIPPool}, nil
+				for _, externalIPPool := range egress.Spec.ExternalIPPools {
+					if externalIPPool != "" {
+						externalIPPools = append(externalIPPools, externalIPPool)
+					}
+				}
+				return externalIPPools, nil
 			},
 			// egressNodeIndex will be used to get all Egresses assigned to a given Node.
 			egressNodeIndex: func(obj interface{}) ([]string, error) {
@@ -577,22 +592,28 @@ func (c *EgressController) unbindPodEgress(pod, egress string) (string, bool) {
 	return "", false
 }
 
-func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bool) error {
+func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, egressIP string) error {
+	isLocal := false
+	if egressIP != "" {
+		isLocal = c.localIPDetector.IsLocalIP(egressIP)
+	}
 	toUpdate := egress.DeepCopy()
 	var updateErr, getErr error
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if isLocal {
 			// Do nothing if the current EgressNode in status is already this Node.
-			if toUpdate.Status.EgressNode == c.nodeName {
+			if toUpdate.Status.EgressNode == c.nodeName && toUpdate.Status.EgressIP == egressIP {
 				return nil
 			}
 			toUpdate.Status.EgressNode = c.nodeName
+			toUpdate.Status.EgressIP = egressIP
 		} else {
 			// Do nothing if the current EgressNode in status is not this Node.
 			if toUpdate.Status.EgressNode != c.nodeName {
 				return nil
 			}
 			toUpdate.Status.EgressNode = ""
+			toUpdate.Status.EgressIP = ""
 		}
 		klog.V(2).InfoS("Updating Egress status", "Egress", egress.Name, "oldNode", egress.Status.EgressNode, "newNode", toUpdate.Status.EgressNode)
 		_, updateErr = c.crdClient.CrdV1alpha2().Egresses().UpdateStatus(context.TODO(), toUpdate, metav1.UpdateOptions{})
@@ -609,6 +630,39 @@ func (c *EgressController) updateEgressStatus(egress *crdv1a2.Egress, isLocal bo
 	klog.V(2).InfoS("Updated Egress status", "Egress", egress.Name)
 	metrics.AntreaEgressStatusUpdates.Inc()
 	return nil
+}
+
+func (c *EgressController) getDesiredEgressIPAndNode(egress *crdv1a2.Egress) (string, bool, error) {
+	if egress.Spec.EgressIP == "" {
+		return "", false, nil
+	}
+	localNodeSelected := false
+	// Only check whether the Egress IP should be assigned to this Node when ExternalIPPool is set.
+	// If ExternalIPPool is empty, users are responsible for assigning the Egress IPs to Nodes.
+	if egress.Spec.ExternalIPPool != "" {
+		maxEgressIPsFilter := func(node string) bool {
+			// Assuming this Egress IP is assigned to this Node.
+			egressIPsOnNode := sets.NewString(egress.Spec.EgressIP)
+			// Add the Egress IPs that are already assigned to this Node.
+			egressesOnNode, _ := c.egressInformer.GetIndexer().ByIndex(egressNodeIndex, node)
+			for _, obj := range egressesOnNode {
+				egressOnNode := obj.(*crdv1a2.Egress)
+				// We don't count manually managed Egress IPs.
+				if egressOnNode.Spec.ExternalIPPool == "" {
+					continue
+				}
+				egressIPsOnNode.Insert(egressOnNode.Spec.EgressIP)
+			}
+			// Check if this Node can accommodate all Egress IPs.
+			return egressIPsOnNode.Len() <= c.maxEgressIPsPerNode
+		}
+		var err error
+		localNodeSelected, err = c.cluster.ShouldSelectIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool, maxEgressIPsFilter)
+		if err != nil {
+			return "", false, fmt.Errorf("error selecting owner Node of the Egress IP %s: %w", egress.Spec.EgressIP, err)
+		}
+	}
+	return egress.Spec.EgressIP, localNodeSelected, nil
 }
 
 func (c *EgressController) syncEgress(egressName string) error {
@@ -634,61 +688,47 @@ func (c *EgressController) syncEgress(egressName string) error {
 		return err
 	}
 
+	// Get the desired Egress IP and whether the agent should assign it to the local Node from the Egress's spec and the
+	// memberlist cluster's state.
+	desiredEgressIP, localNodeSelected, err := c.getDesiredEgressIPAndNode(egress)
+	if err != nil {
+		return err
+	}
+	// Get the actual Egress state that the agent previously realized.
 	eState, exist := c.getEgressState(egressName)
 	// If the EgressIP changes, uninstalls this Egress first.
-	if exist && eState.egressIP != egress.Spec.EgressIP {
+	if exist && eState.egressIP != desiredEgressIP {
 		if err := c.uninstallEgress(egressName, eState); err != nil {
 			return err
 		}
 		exist = false
 	}
-	// Do not proceed if EgressIP is empty.
-	if egress.Spec.EgressIP == "" {
+	// Do not proceed if desired EgressIP is empty.
+	if desiredEgressIP == "" {
+		if err := c.updateEgressStatus(egress, ""); err != nil {
+			return fmt.Errorf("update Egress %s status error: %v", egressName, err)
+		}
 		return nil
 	}
 	if !exist {
-		eState = c.newEgressState(egressName, egress.Spec.EgressIP)
+		eState = c.newEgressState(egressName, desiredEgressIP)
 	}
 
-	localNodeSelected := false
-	// Only check whether the Egress IP should be assigned to this Node when ExternalIPPool is set.
-	// If ExternalIPPool is empty, users are responsible for assigning the Egress IPs to Nodes.
-	if egress.Spec.ExternalIPPool != "" {
-		maxEgressIPsFilter := func(node string) bool {
-			// Assuming this Egress IP is assigned to this Node.
-			egressIPsOnNode := sets.NewString(egress.Spec.EgressIP)
-			// Add the Egress IPs that are already assigned to this Node.
-			egressesOnNode, _ := c.egressInformer.GetIndexer().ByIndex(egressNodeIndex, node)
-			for _, obj := range egressesOnNode {
-				egressOnNode := obj.(*crdv1a2.Egress)
-				// We don't count manually managed Egress IPs.
-				if egressOnNode.Spec.ExternalIPPool == "" {
-					continue
-				}
-				egressIPsOnNode.Insert(egressOnNode.Spec.EgressIP)
-			}
-			// Check if this Node can accommodate all Egress IPs.
-			return egressIPsOnNode.Len() <= c.maxEgressIPsPerNode
-		}
-		localNodeSelected, err = c.cluster.ShouldSelectIP(egress.Spec.EgressIP, egress.Spec.ExternalIPPool, maxEgressIPsFilter)
-		if err != nil {
-			return err
-		}
-	}
 	if localNodeSelected {
 		// Ensure the Egress IP is assigned to the system.
-		if err := c.ipAssigner.AssignIP(egress.Spec.EgressIP); err != nil {
+		if err := c.ipAssigner.AssignIP(desiredEgressIP); err != nil {
 			return err
 		}
 	} else {
 		// Unassign the Egress IP from the local Node if it was assigned by the agent.
-		if err := c.ipAssigner.UnassignIP(egress.Spec.EgressIP); err != nil {
+		// Note that the method doesn't unassign the IP from the system if it was not previously assigned by the agent.
+		if err := c.ipAssigner.UnassignIP(desiredEgressIP); err != nil {
 			return err
 		}
 	}
 
 	// Realize the latest EgressIP and get the desired mark.
-	mark, err := c.realizeEgressIP(egressName, egress.Spec.EgressIP)
+	mark, err := c.realizeEgressIP(egressName, desiredEgressIP)
 	if err != nil {
 		return err
 	}
@@ -703,7 +743,7 @@ func (c *EgressController) syncEgress(egressName string) error {
 		eState.mark = mark
 	}
 
-	if err := c.updateEgressStatus(egress, c.localIPDetector.IsLocalIP(egress.Spec.EgressIP)); err != nil {
+	if err := c.updateEgressStatus(egress, desiredEgressIP); err != nil {
 		return fmt.Errorf("update Egress %s status error: %v", egressName, err)
 	}
 
