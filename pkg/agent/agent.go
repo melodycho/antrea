@@ -90,6 +90,15 @@ var (
 // need to be deleted when changing to "psk".
 var otherConfigKeysForIPsecCertificates = []string{"certificate", "private_key", "ca_cert", "remote_cert", "remote_name"}
 
+type AgentInitialierI interface {
+	ConnectUplinkToOVSBridge() error
+	RestoreOVSBridge()
+	GetNodeConfig() *config.NodeConfig
+	GetWireGuardClient() wireguard.Interface
+	Initialize() error
+	FlowRestoreComplete() error
+}
+
 // Initializer knows how to setup host networking, OpenVSwitch, and Openflow.
 type Initializer struct {
 	client                clientset.Interface
@@ -144,7 +153,7 @@ func NewInitializer(
 	proxyAll bool,
 	connectUplinkToBridge bool,
 	enableL7NetworkPolicy bool,
-) *Initializer {
+) AgentInitialierI {
 	return &Initializer{
 		ovsBridgeClient:       ovsBridgeClient,
 		ovsCtlClient:          ovsCtlClient,

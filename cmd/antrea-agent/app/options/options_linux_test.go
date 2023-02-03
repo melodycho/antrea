@@ -77,7 +77,7 @@ func TestMulticlusterOptions(t *testing.T) {
 				EnableStretchedNetworkPolicy: true,
 			},
 			featureGate: true,
-			expectedErr: "Multi-cluster Gateway must be enabled to enable StretchedNetworkPolicy",
+			expectedErr: "multi-cluster Gateway must be enabled to enable StretchedNetworkPolicy",
 		},
 		{
 			name: "NoEncap",

@@ -1,7 +1,17 @@
 package app
 
 import (
+	"antrea.io/antrea/pkg/agent"
+	"antrea.io/antrea/pkg/agent/config"
+	"antrea.io/antrea/pkg/agent/interfacestore"
+	"antrea.io/antrea/pkg/agent/openflow"
+	"antrea.io/antrea/pkg/agent/route"
+	testing2 "antrea.io/antrea/pkg/agent/testing"
+	"antrea.io/antrea/pkg/ovs/ovsctl"
+	"antrea.io/antrea/pkg/util/env"
 	"context"
+	"github.com/golang/mock/gomock"
+	"os"
 	"reflect"
 	"runtime"
 	"testing"
@@ -43,11 +53,19 @@ func TestRunAgentController(t *testing.T) {
 		apiExtensionClient := fakeapiextensionclientset.NewSimpleClientset()
 		return fakeclientset.NewSimpleClientset(), aggregatorClientset, crdfake.NewSimpleClientset(), apiExtensionClient, mcfake.NewSimpleClientset(), nil
 	}
+	newAgentInitializerFunc = func(k8sClient clientset.Interface, crdClient crdclientset.Interface, ovsBridgeClient ovsconfig.OVSBridgeClient, ovsCtlClient ovsctl.OVSCtlClient, ofClient openflow.Client, routeClient route.Interface, ifaceStore interfacestore.InterfaceStore, ovsBridge string, hostGateway string, mtu int, networkConfig *config.NetworkConfig, wireGuardConfig *config.WireGuardConfig, egressConfig *config.EgressConfig, serviceConfig *config.ServiceConfig, networkReadyCh chan<- struct{}, stopCh <-chan struct{}, nodeType config.NodeType, externalNodeNamespace string, enableProxy bool, proxyAll bool, connectUplinkToBridge bool, enableL7NetworkPolicy bool) agent.AgentInitialierI {
+		ctl := gomock.NewController(t)
+		defer ctl.Finish()
+		mockAgentInit := testing2.NewMockAgentInitialierI(ctl)
+		return mockAgentInit
+	}
 
 	opts := options.NewOptions()
 	if err := opts.Complete(); err != nil {
 		t.Errorf("Complete antrea controller config error: %v", err)
 	}
+
+	_ = os.Setenv(env.NodeNameEnvKey, "name")
 
 	newOVSDBConnection = func(address string) (*ovsdb.OVSDB, ovsconfig.Error) {
 

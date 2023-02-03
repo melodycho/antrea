@@ -96,8 +96,9 @@ var excludeNodePortDevices = []string{"antrea-egress0", "antrea-ingress0", "kube
 var ipv4Localhost = net.ParseIP("127.0.0.1")
 
 var (
-	createK8sClient    = k8s.CreateClients
-	newOVSDBConnection = ovsconfig.NewOVSDBConnectionUDS
+	createK8sClient         = k8s.CreateClients
+	newOVSDBConnection      = ovsconfig.NewOVSDBConnectionUDS
+	newAgentInitializerFunc = agent.NewInitializer
 )
 
 var goExec = func(function func(stopCh <-chan struct{}), stopCh <-chan struct{}) {
@@ -272,7 +273,7 @@ func Run(o *agentoptions.Options) error {
 	}
 
 	// Initialize agent and node network.
-	agentInitializer := agent.NewInitializer(
+	agentInitializer := newAgentInitializerFunc(
 		k8sClient,
 		crdClient,
 		ovsBridgeClient,
@@ -642,7 +643,7 @@ func Run(o *agentoptions.Options) error {
 		// go podUpdateChannel.Run(stopCh)
 		// go cniServer.Run(stopCh)
 		// go nodeRouteController.Run(stopCh)
-		goExec(routeClient.Run, stopCh)
+		// goExec(routeClient.Run, stopCh)
 		goExec(podUpdateChannel.Run, stopCh)
 		goExec(cniServer.Run, stopCh)
 		goExec(nodeRouteController.Run, stopCh)
