@@ -90,12 +90,12 @@ func NewOptions() *Options {
 	}
 }
 
-// addFlags adds flags to fs and binds them to options.
+// AddFlags adds flags to fs and binds them to options.
 func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.configFile, "config", o.configFile, "The path to the configuration file")
 }
 
-// complete completes all the required options.
+// Complete completes all the required options.
 func (o *Options) Complete() error {
 	if len(o.configFile) > 0 {
 		if err := o.loadConfigFromFile(); err != nil {
@@ -115,7 +115,7 @@ func (o *Options) Complete() error {
 	return nil
 }
 
-// validate validates all the required options. It must be called after complete.
+// Validate validates all the required options. It must be called after complete.
 func (o *Options) Validate(args []string) error {
 	if len(args) != 0 {
 		return fmt.Errorf("no positional arguments are supported")
