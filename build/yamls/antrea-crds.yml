@@ -1079,6 +1079,10 @@ spec:
               - egressIP
             - required:
               - externalIPPool
+            - required:
+              - egressIPs
+            - required:
+              - externalIPPools
             properties:
               appliedTo:
                 type: object
@@ -1136,24 +1140,37 @@ spec:
                 oneOf:
                 - format: ipv4
                 - format: ipv6
+              egressIPs:
+                type: array
+                items:
+                  type: string
+                  oneOf:
+                    - format: ipv4
+                    - format: ipv6
               externalIPPool:
                 type: string
+              externalIPPools:
+                type: array
+                items:
+                  type: string
           status:
             type: object
             properties:
               egressNode:
                 type: string
+              egressIP:
+                type: string
     additionalPrinterColumns:
-    - description: Specifies the SNAT IP address for the selected workloads.
-      jsonPath: .spec.egressIP
-      name: EgressIP
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     - description: The Owner Node of egress IP
       jsonPath: .status.egressNode
       name: Node
+      type: string
+    - description: The egressIP specifies the SNAT IP address for the selected workloads.
+      jsonPath: .status.egressIP
+      name: EgressIP
       type: string
     subresources:
       status: {}
