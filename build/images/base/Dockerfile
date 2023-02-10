@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG OVS_VERSION
-FROM ubuntu:20.04 as cni-binaries
+ARG BUILD_TAG
+FROM ubuntu:22.04 as cni-binaries
 
 ARG CNI_BINARIES_VERSION
 ARG WHEREABOUTS_VERSION=v0.5.4
@@ -37,7 +37,9 @@ RUN set -eux; \
     wget -q -O - https://github.com/containernetworking/plugins/releases/download/$CNI_BINARIES_VERSION/cni-plugins-linux-${pluginsArch}-$CNI_BINARIES_VERSION.tgz | tar xz -C /opt/cni/bin $CNI_PLUGINS; \
     wget -q -O /opt/cni/bin/whereabouts https://github.com/k8snetworkplumbingwg/whereabouts/releases/download/$WHEREABOUTS_VERSION/whereabouts-${pluginsArch} && chmod +x /opt/cni/bin/whereabouts
 
-FROM antrea/openvswitch:${OVS_VERSION}
+FROM antrea/openvswitch:${BUILD_TAG}
+
+ARG SURICATA_VERSION
 
 LABEL maintainer="Antrea <projectantrea-dev@googlegroups.com>"
 LABEL description="An Ubuntu based Docker base image for Antrea."
@@ -50,8 +52,9 @@ USER root
 # chmod in the RUN command below instead.
 ADD https://raw.githubusercontent.com/kubernetes-sigs/iptables-wrappers/9e6ce59c864623ea71a6f7d59c35fcb13a919b87/iptables-wrapper-installer.sh /iptables-wrapper-installer.sh
 
-RUN apt-get update && apt-get install -y --no-install-recommends ipset jq inotify-tools && \
-    rm -rf /var/lib/apt/lists/* && \
+RUN apt-get update && apt-get install -y --no-install-recommends ipset jq inotify-tools gpg-agent software-properties-common && \
+    add-apt-repository ppa:oisf/suricata-${SURICATA_VERSION} && apt-get update && apt-get install -y suricata && \
+    apt-get remove -y gpg-agent software-properties-common && apt-get autoremove -y && rm -rf /var/cache/apt/* /var/lib/apt/lists/* && \
     chmod +x /iptables-wrapper-installer.sh && \
     /iptables-wrapper-installer.sh
 

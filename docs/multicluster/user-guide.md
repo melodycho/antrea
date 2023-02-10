@@ -10,28 +10,40 @@
   - [Create ClusterSet](#create-clusterset)
 - [Multi-cluster Gateway Configuration](#multi-cluster-gateway-configuration)
 - [Multi-cluster Service](#multi-cluster-service)
-- [Multi-cluster ClusterNetworkPolicy Replication](#multi-cluster-clusternetworkpolicy-replication)
-- [Build Antrea Multi-cluster Image](#build-antrea-multi-cluster-image)
+- [Multi-cluster Pod to Pod Connectivity](#multi-cluster-pod-to-pod-connectivity)
+- [Multi-cluster NetworkPolicy](#multi-cluster-networkpolicy)
+  - [Egress Rule to Multi-cluster Services](#egress-rule-to-multi-cluster-service)
+  - [Ingress Rule](#ingress-rule)
+- [ClusterNetworkPolicy Replication](#clusternetworkpolicy-replication)
+- [Build Antrea Multi-cluster Controller Image](#build-antrea-multi-cluster-controller-image)
 - [Known Issue](#known-issue)
 <!-- /toc -->
 
 Antrea Multi-cluster implements [Multi-cluster Service API](https://github.com/kubernetes/enhancements/tree/master/keps/sig-multicluster/1645-multi-cluster-services-api),
 which allows users to create multi-cluster Services that can be accessed cross
-clusters in a ClusterSet. Antrea Multi-cluster also supports Antrea
-ClusterNetworkPolicy replication. A Multi-cluster ClusterSet admin can define
-ClusterNetworkPolicies to be replicated across the entire ClusterSet and
-enforced in all member clusters. Antrea Multi-cluster was first introduced in
-Antrea v1.5.0, and the ClusterNetworkPolicy replication feature is supported
-since Antrea v1.6.0. In Antrea v1.7.0, the Multi-cluster Gateway feature was
-added that supports routing multi-cluster Service traffic through tunnels among
-clusters.
+clusters in a ClusterSet. Antrea Multi-cluster also extends Antrea native
+NetworkPolicy to support Multi-cluster NetworkPolicy rules that apply to
+cross-cluster traffic, and ClusterNetworkPolicy replication that allows a
+ClusterSet admin to create ClusterNetworkPolicies which are replicated across
+the entire ClusterSet and enforced in all member clusters. Antrea Multi-cluster
+was first introduced in Antrea v1.5.0. In Antrea v1.7.0, the Multi-cluster
+Gateway feature was added that supports routing multi-cluster Service traffic
+through tunnels among clusters. The ClusterNetworkPolicy replication feature is
+supported since Antrea v1.6.0, and Multi-cluster NetworkPolicy rules are
+supported since Antrea v1.10.0.
 
 ## Quick Start
 
-Please refer to the [Quick Start Guide](./quick-start.md) to learn how to build a ClusterSet
-with two clusters quickly.
+Please refer to the [Quick Start Guide](quick-start.md) to learn how to build a
+ClusterSet with two clusters quickly.
 
 ## Installation
+
+In this guide, all Multi-cluster installation and ClusterSet configuration are
+done by applying Antrea Multi-cluster YAML manifests. Actually, all operations
+can also be done with `antctl` Multi-cluster commands, which may be more
+convenient in many cases. You can refer to the [Quick Start Guide](quick-start.md)
+and [antctl Guide](antctl.md) to learn how to use the Multi-cluster commands.
 
 ### Preparation
 
@@ -47,13 +59,15 @@ To use the latest version of Antrea Multi-cluster from the Antrea main branch,
 you can change the YAML manifest path to: `https://github.com/antrea-io/antrea/tree/main/multicluster/build/yamls/`
 when applying or downloading an Antrea YAML manifest.
 
-Since Antrea 1.7.0, multi-cluster Services require an Antrea Multi-cluster
-Gateway to be set up in each member cluster to route Service traffic across
-clusters, and Service CIDRs (ClusterIP ranges) must not overlap among clusters.
-To support Multi-cluster Gateways, `antrea-agent` must be deployed with the
-`Multicluster` feature enabled in a member cluster. You can set the following
-configuration parameters in `antrea-agent.conf` of the Antrea deployment
-manifest to enable the `Multicluster` feature:
+[Multi-cluster Services](#multi-cluster-service) and
+[multi-cluster Pod-to-Pod connectivity](#multi-cluster-pod-to-pod-connectivity),
+in particular configuration (please check the corresponding sections to learn more
+information), requires an Antrea Multi-cluster Gateway to be set up in each member
+cluster to route Service and Pod traffic across clusters. To support Multi-cluster
+Gateways, `antrea-agent` must be deployed with the `Multicluster` feature enabled
+in a member cluster. You can set the following configuration parameters in
+`antrea-agent.conf` of the Antrea deployment manifest to enable the `Multicluster`
+feature:
 
 ```yaml
 antrea-agent.conf: |
@@ -63,8 +77,8 @@ antrea-agent.conf: |
     Multicluster: true
 ...
   multicluster:
-    enable: true
-    namespace: ""
+    enableGateway: true
+    namespace: "" # Change to the Namespace where antrea-mc-controller is deployed.
 ```
 
 At the moment, Multi-cluster Gateway only works with the Antrea `encap` traffic
@@ -335,12 +349,12 @@ spec:
 ## Multi-cluster Gateway Configuration
 
 Multi-cluster Gateways are required to support multi-cluster Service access
-across member clusters. Each member cluster should have one Node be specified as
-its Multi-cluster Gateway. Multi-cluster Service traffic is routed among clusters
+across member clusters. Each member cluster should have one Node served as its
+Multi-cluster Gateway. Multi-cluster Service traffic is routed among clusters
 through the tunnels between Gateways.
 
 After a member cluster joins a ClusterSet, and the `Multicluster` feature is
-enabled on `antrea-agent`, you can select one Node of the cluster to serve as
+enabled on `antrea-agent`, you can select a Node of the cluster to serve as
 the Multi-cluster Gateway by adding an annotation:
 `multicluster.antrea.io/gateway=true` to the K8s Node. For example, you can run
 the following command to annotate Node `node-1` as the Multi-cluster Gateway:
@@ -349,8 +363,18 @@ the following command to annotate Node `node-1` as the Multi-cluster Gateway:
 $kubectl annotate node node-1 multicluster.antrea.io/gateway=true
 ```
 
-Multi-cluster Controller in the member cluster will detect the Gateway Node, and
-create a `Gateway` CR with the same name as the Node. You can check it with command:
+You can annotate multiple Nodes in a member cluster as the candidates for
+Multi-cluster Gateway, but only one Node will be selected as the active Gateway.
+Before Antrea v1.9.0, the Gateway Node is just randomly selected and will never
+change unless the Node or its `gateway` annotation is deleted. Starting with
+Antrea v1.9.0, Antrea Multi-cluster Controller will guarantee a "ready" Node
+is selected as the Gateway, and when the current Gateway Node's status changes
+to not "ready", Antrea will try selecting another "ready" Node from the
+candidate Nodes to be the Gateway.
+
+Once a Gateway Node is decided, Multi-cluster Controller in the member cluster
+will create a `Gateway` CR with the same name as the Node. You can check it with
+command:
 
 ```bash
 $kubectl get gateway -n kube-system
@@ -369,24 +393,24 @@ there are several possibilities:
 * You can choose to use the K8s Node's `ExternalIP` as `gatewayIP`, by changing
 the configuration option `gatewayIPPrecedence` to value: `external`, when
 deploying the member Multi-cluster Controller. The configration option is
-defined in ConfigMap `antrea-mc-controller-config-***` in `antrea-multicluster-member.yml`.
+defined in ConfigMap `antrea-mc-controller-config` in `antrea-multicluster-member.yml`.
 * When the Gateway Node has a separate IP for external communication or is
 associated with a public IP (e.g. an Elastic IP on AWS), but the IP is not added
 to the K8s Node, you can still choose to use the IP as `gatewayIP`, by adding an
 annotation: `multicluster.antrea.io/gateway-ip=<ip-address>` to the K8s Node.
 
-When selecting the Multi-cluster Gateway Node, you need to make sure the
-resulted `gatewayIP` can be reached from the remote Gateways. You may need to
-[configure firewall or security groups](../network-requirements.md) properly to
-allow the tunnels between Gateway Nodes. As of now, only IPv4 Gateway IPs are
+When choosing a candidate Node for Multi-cluster Gateway, you need to make sure
+the resulted `gatewayIP` can be reached from the remote Gateways. You may need
+to [configure firewall or security groups](../network-requirements.md) properly
+to allow the tunnels between Gateway Nodes. As of now, only IPv4 Gateway IPs are
 supported.
 
-After the Gateway is detected, Multi-cluster Controller will be responsible
+After the Gateway is created, Multi-cluster Controller will be responsible
 for exporting the cluster's network information to other member clusters
 through the leader cluster, including the cluster's Gateway IP and Service
 CIDR. Multi-cluster Controller will try to discover the cluster's Service CIDR
 automatically, but you can also manually specify the `serviceCIDR` option in
-ConfigMap `antrea-mc-controller-config-***`. In other member clusters, a
+ConfigMap `antrea-mc-controller-config`. In other member clusters, a
 ClusterInfoImport CR will be created for the cluster which includes the
 exported network information. For example, in cluster `test-cluster-west`, you
 you can see a ClusterInfoImport CR with name `test-cluster-east-clusterinfo`
@@ -469,7 +493,202 @@ exported a Service: `default/nginx` with TCP Port `80`, other clusters can only
 export the same Service with the same Ports definition including Port names. At
 the moment, Antrea Multi-cluster supports only IPv4 multi-cluster Services.
 
-## Multi-cluster ClusterNetworkPolicy Replication
+By default, a multi-cluster Service will use the exported Services' ClusterIPs (the
+original Service ClusterIPs in the export clusters) as Endpoints. Since Antrea
+v1.9.0, Antrea Multi-cluster also supports using the backend Pod IPs as the
+multi-cluster Service endpoints. You can change the value of configuration option
+`endpointIPType` in ConfigMap `antrea-mc-controller-config` from `ClusterIP`
+to `PodIP` to use Pod IPs as endpoints. All member clusters in a ClusterSet should
+use the same endpoint type. Existing ServiceExports should be re-exported after
+changing `endpointIPType`. `ClusterIP` type requires that Service CIDRs (ClusterIP
+ranges) must not overlap among member clusters, and always requires Multi-cluster
+Gateways to be configured. `PodIP` type requires Pod CIDRs not to overlap among
+clusters, and it also requires Multi-cluster Gateways when there is no direct Pod-to-Pod
+connectivity across clusters. Also refer to [Multi-cluster Pod-to-Pod Connectivity](#multi-cluster-pod-to-pod-connectivity)
+for more information.
+
+## Multi-cluster Pod-to-Pod Connectivity
+
+Since Antrea v1.9.0, Multi-cluster supports routing Pod traffic across clusters
+through Multi-cluster Gateways. Pod IPs can be reached in all member clusters
+within a ClusterSet. To enable this feature, the cluster's Pod CIDRs must be set in
+ConfigMap `antrea-mc-controller-config` of each member cluster like the example
+below. Note, **Pod CIDRs must not overlap among clusters to enable cross-cluster
+Pod-to-Pod connectivity**.
+
+```yaml
+apiVersion: v1
+data:
+  controller_manager_config.yaml: |
+    apiVersion: multicluster.crd.antrea.io/v1alpha1
+    kind: MultiClusterConfig
+    ...
+    podCIDRs:
+      - "10.10.1.1/16"
+kind: ConfigMap
+metadata:
+  labels:
+    app: antrea
+  name: antrea-mc-controller-config
+  namespace: kube-system
+```
+
+You can edit [antrea-multicluster-member.yml](../../multicluster/build/yamls/antrea-multicluster-member.yml),
+or use `kubectl edit` to change the ConfigMap:
+
+```bash
+kubectl edit configmap -n kube-system antrea-mc-controller-config
+```
+
+Normally, `podCIDRs` should be the value of `kube-controller-manager`'s
+`cluster-cidr` option. If it's left empty, the Pod-to-Pod connectivity feature
+will not be enabled. If you use `kubectl edit` to edit the ConfigMap, then you
+need to restart the `antrea-mc-controller` Pod to load the latest configuration.
+
+## Multi-cluster NetworkPolicy
+
+Antrea-native policies can be enforced on cross-cluster traffic in a ClusterSet.
+To enable Multi-cluster NetworkPolicy features, check the Antrea Controller and
+Agent ConfigMaps and make sure that `enableStretchedNetworkPolicy` is set to
+`true` in addition to enabling the `multicluster` feature gate:
+
+```yaml
+antrea-controller.conf: |
+  featureGates:
+...
+    Multicluster: true
+...
+  multicluster:
+    enableStretchedNetworkPolicy: true # required by both egress and ingres rules
+```
+
+```yaml
+antrea-agent.conf: |
+  featureGates:
+...
+    Multicluster: true
+...
+  multicluster:
+    enableGateway: true
+    enableStretchedNetworkPolicy: true # required by only ingress rules
+    namespace: ""
+```
+
+### Egress Rule to Multi-cluster Service
+
+Restricting Pod egress traffic to backends of a Multi-cluster Service (which can be on the
+same cluster of the source Pod or on a different cluster) is supported by Antrea-native
+policy's `toServices` feature in egress rules. To define such a policy, simply put the exported
+Service name and Namespace in the `toServices` field of an Antrea-native policy, and set `scope`
+of the `toServices` peer to `ClusterSet`:
+
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: acnp-drop-tenant-to-secured-mc-service
+spec:
+  priority: 1
+  tier: securityops
+  appliedTo:
+    - podSelector:
+        matchLabels:
+          role: tenant
+  egress:
+    - action: Drop
+      toServices:
+        - name: secured-service   # an exported Multi-cluster Service
+          namespace: svcNamespace
+          scope: ClusterSet
+```
+
+The `scope` field of `toServices` rules is supported since Antrea v1.10. For earlier versions
+of Antrea, an equivalent rule can be written by not specifying `scope` and providing the
+imported Service name instead (i.e. `antrea-mc-[svcName]`).
+
+Note that the scope of policy's `appliedTo` field will still be restricted to the cluster
+where the policy is created in. To enforce such a policy for all `role=tenant` Pods in the
+entire ClusterSet, use the [ClusterNetworkPolicy Replication](#clusternetworkpolicy-replication)
+feature described in the later section, and set the `clusterNetworkPolicy` field of
+the ResourceExport to the `acnp-drop-tenant-to-secured-mc-service` spec above. Such
+replication should only be performed by ClusterSet admins, who have clearance of creating
+ClusterNetworkPolicies in all clusters of a ClusterSet.
+
+### Ingress Rule
+
+Antrea-native policies now support selecting ingress peers in the ClusterSet scope (since v1.10.0).
+Policy rules can be created to enforce security postures on ingress traffic from all member
+clusters in a ClusterSet:
+
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: ClusterNetworkPolicy
+metadata:
+  name: drop-tenant-access-to-admin-namespace
+spec:
+  appliedTo:
+  - namespaceSelector:
+      matchLabels:
+        role: admin
+  priority: 1
+  tier: securityops
+  ingress:
+  - action: Deny
+    from:
+    # Select all Pods in role=tenant Namespaces in the ClusterSet
+    - scope: ClusterSet
+      namespaceSelector:
+        matchLabels:
+          role: tenant
+```
+
+```yaml
+apiVersion: crd.antrea.io/v1alpha1
+kind: AntreaNetworkPolicy
+metadata:
+  name: db-svc-allow-ingress-from-client-only
+  namespace: prod-us-west
+spec:
+  appliedTo:
+  - podSelector:
+      matchLabels:
+        app: db
+  priority: 1
+  tier: application
+  ingress:
+  - action: Allow
+    from:
+    # Select all Pods in Namespace "prod-us-west" from all clusters in the ClusterSet (if the
+    # Namespace exists in that cluster) whose labels match app=client
+    - scope: ClusterSet
+      podSelector:
+        matchLabels:
+          app: client
+  - action: Deny
+```
+
+As shown in the examples above, setting `scope` to `ClusterSet` expands the
+scope of the `podSelector` or `namespaceSelector` of an ingress peer to the
+entire ClusterSet that the policy is created in. Similar to egress rules, the
+scope of an ingress rule's `appliedTo` is still restricted to the local cluster.
+
+To use the ingress cross-cluster NetworkPolicy feature, the `enableStretchedNetworkPolicy`
+option needs to be set to `true` in `antrea-mc-controller-config`, for each `antrea-mc-controller`
+running in the ClusterSet. Refer to the [previous section](#multi-cluster-pod-to-pod-connectivity)
+on how to change the ConfigMap:
+
+```yaml
+  controller_manager_config.yaml: |
+    apiVersion: multicluster.crd.antrea.io/v1alpha1
+    kind: MultiClusterConfig
+    ...
+    enableStretchedNetworkPolicy: true
+```
+
+Note that currently ingress stretched NetworkPolicy only works with the Antrea `encap`
+traffic mode.
+
+## ClusterNetworkPolicy Replication
 
 Since Antrea v1.6.0, Multi-cluster admins can specify certain
 ClusterNetworkPolicies to be replicated and enforced across the entire
@@ -494,7 +713,7 @@ metadata:
 spec:
   kind: AntreaClusterNetworkPolicy
   name: strict-namespace-isolation # In each importing cluster, an ACNP of name antrea-mc-strict-namespace-isolation will be created with the spec below
-  clusternetworkpolicy:
+  clusterNetworkPolicy:
     priority: 1
     tier: securityops
     appliedTo:
@@ -559,14 +778,15 @@ In future releases, some additional tooling may become available to automate the
 creation of ResourceExports for ACNPs, and provide a user-friendly way to define
 Multi-cluster NetworkPolicies to be enforced in the ClusterSet.
 
-## Build Antrea Multi-cluster Image
+## Build Antrea Multi-cluster Controller Image
 
-If you'd like to build Antrea Multi-cluster Docker image locally, you can follow
-the following steps:
+If you'd like to build Multi-cluster Controller Docker image locally, you can
+follow the following steps:
 
-1. Go to your local `antrea` source tree, run `make antrea-mc-controller`, and you will get a new image
-   named `antrea/antrea-mc-controller:latest` locally.
-2. Run `docker save antrea/antrea-mc-controller:latest > antrea-mcs.tar` to save the image.
+1. Go to your local `antrea` source tree, run `make antrea-mc-controller`, and you
+will get a new image named `antrea/antrea-mc-controller:latest` locally.
+2. Run `docker save antrea/antrea-mc-controller:latest > antrea-mcs.tar` to save
+the image.
 3. Copy the image file `antrea-mcs.tar` to the Nodes of your local cluster.
 4. Run `docker load < antrea-mcs.tar` in each Node of your local cluster.
 

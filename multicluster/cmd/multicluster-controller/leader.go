@@ -1,18 +1,16 @@
-/*
-Copyright 2021 Antrea Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Copyright 2021 Antrea Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package main
 
 import (
@@ -26,6 +24,7 @@ import (
 
 	multiclusterv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	multiclustercontrollers "antrea.io/antrea/multicluster/controllers/multicluster"
+	"antrea.io/antrea/multicluster/controllers/multicluster/leader"
 	"antrea.io/antrea/pkg/log"
 	"antrea.io/antrea/pkg/signals"
 	"antrea.io/antrea/pkg/util/env"
@@ -54,13 +53,14 @@ func newLeaderCommand() *cobra.Command {
 func runLeader(o *Options) error {
 	// on the leader we want the reconciler to run for a given Namespace instead of cluster scope
 	o.options.Namespace = env.GetPodNamespace()
+	stopCh := signals.RegisterSignalHandlers()
 
-	mgr, err := setupManagerAndCertController(o)
+	mgr, err := setupManagerAndCertControllerFunc(o)
 	if err != nil {
 		return err
 	}
 
-	memberClusterStatusManager := multiclustercontrollers.NewMemberClusterAnnounceReconciler(
+	memberClusterStatusManager := leader.NewMemberClusterAnnounceReconciler(
 		mgr.GetClient(), mgr.GetScheme())
 	if err = memberClusterStatusManager.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating MemberClusterAnnounce controller: %v", err)
@@ -76,7 +76,7 @@ func runLeader(o *Options) error {
 			Client:    noCachedClient,
 			namespace: env.GetPodNamespace()}})
 
-	clusterSetReconciler := &multiclustercontrollers.LeaderClusterSetReconciler{
+	clusterSetReconciler := &leader.LeaderClusterSetReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		StatusManager: memberClusterStatusManager,
@@ -85,16 +85,26 @@ func runLeader(o *Options) error {
 		return fmt.Errorf("error creating ClusterSet controller: %v", err)
 	}
 
-	resExportReconciler := &multiclustercontrollers.ResourceExportReconciler{
+	resExportReconciler := &leader.ResourceExportReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme()}
 	if err = resExportReconciler.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating ResourceExport controller: %v", err)
 	}
+	if o.EnableStretchedNetworkPolicy {
+		labelExportReconciler := leader.NewLabelIdentityExportReconciler(
+			mgr.GetClient(),
+			mgr.GetScheme(),
+			env.GetPodNamespace())
+		if err = labelExportReconciler.SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("error creating LabelIdentityExport controller: %v", err)
+		}
+		go labelExportReconciler.Run(stopCh)
+	}
+
 	if err = (&multiclusterv1alpha1.ResourceExport{}).SetupWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("error creating ResourceExport webhook: %v", err)
 	}
-	stopCh := signals.RegisterSignalHandlers()
 	staleController := multiclustercontrollers.NewStaleResCleanupController(
 		mgr.GetClient(),
 		mgr.GetScheme(),

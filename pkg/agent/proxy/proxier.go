@@ -19,7 +19,6 @@ import (
 	"math"
 	"net"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,8 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	k8sapitypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
+	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -43,15 +41,12 @@ import (
 	binding "antrea.io/antrea/pkg/ovs/openflow"
 	k8sproxy "antrea.io/antrea/third_party/proxy"
 	"antrea.io/antrea/third_party/proxy/config"
+	"antrea.io/antrea/third_party/proxy/healthcheck"
 )
 
 const (
 	resyncPeriod  = time.Minute
 	componentName = "antrea-agent-proxy"
-	// Due to the maximum message size in Openflow 1.3 and the implementation of Services in Antrea, the maximum number
-	// of Endpoints that Antrea can support at the moment is 800. If the number of Endpoints for a given Service exceeds
-	// 800, extra Endpoints will be dropped.
-	maxEndpoints = 800
 	// SessionAffinity timeout is implemented using a hard_timeout in OVS. hard_timeout is
 	// represented by a uint16 in the OpenFlow protocol,
 	maxSupportedAffinityTimeout = math.MaxUint16
@@ -105,8 +100,9 @@ type proxier struct {
 	serviceStringMap map[string]k8sproxy.ServicePortName
 	// serviceStringMapMutex protects serviceStringMap object.
 	serviceStringMapMutex sync.Mutex
-	// oversizeServiceSet records the Services that have more than 800 Endpoints.
-	oversizeServiceSet sets.String
+
+	serviceHealthServer healthcheck.ServiceHealthServer
+	numLocalEndpoints   map[apimachinerytypes.NamespacedName]int
 
 	// syncedOnce returns true if the proxier has synced rules at least once.
 	syncedOnce      bool
@@ -117,7 +113,6 @@ type proxier struct {
 	ofClient                  openflow.Client
 	routeClient               route.Interface
 	nodePortAddresses         []net.IP
-	hostGateWay               string
 	hostname                  string
 	isIPv6                    bool
 	proxyAll                  bool
@@ -151,9 +146,6 @@ func (p *proxier) removeStaleServices() {
 		}
 		svcInfo := svcPort.(*types.ServiceInfo)
 		klog.V(2).Infof("Removing stale Service: %s %s", svcPortName.Name, svcInfo.String())
-		if p.oversizeServiceSet.Has(svcPortName.String()) {
-			p.oversizeServiceSet.Delete(svcPortName.String())
-		}
 		if err := p.ofClient.UninstallServiceFlows(svcInfo.ClusterIP(), uint16(svcInfo.Port()), svcInfo.OFProtocol); err != nil {
 			klog.ErrorS(err, "Failed to remove flows of Service", "Service", svcPortName)
 			continue
@@ -178,7 +170,7 @@ func (p *proxier) removeStaleServices() {
 		// Remove Service group whose Endpoints are local.
 		if svcInfo.NodeLocalExternal() {
 			if groupIDLocal, exist := p.groupCounter.Get(svcPortName, true); exist {
-				if err := p.ofClient.UninstallGroup(groupIDLocal); err != nil {
+				if err := p.ofClient.UninstallServiceGroup(groupIDLocal); err != nil {
 					klog.ErrorS(err, "Failed to remove Group of local Endpoints for Service", "Service", svcPortName)
 					continue
 				}
@@ -187,7 +179,7 @@ func (p *proxier) removeStaleServices() {
 		}
 		// Remove Service group which has all Endpoints.
 		if groupID, exist := p.groupCounter.Get(svcPortName, false); exist {
-			if err := p.ofClient.UninstallGroup(groupID); err != nil {
+			if err := p.ofClient.UninstallServiceGroup(groupID); err != nil {
 				klog.ErrorS(err, "Failed to remove Group of all Endpoints for Service", "Service", svcPortName)
 				continue
 			}
@@ -415,66 +407,18 @@ func (p *proxier) installServices() {
 		}
 
 		var allEndpointUpdateList, localEndpointUpdateList []k8sproxy.Endpoint
-		if len(endpoints) > maxEndpoints {
-			if !p.oversizeServiceSet.Has(svcPortName.String()) {
-				klog.Warningf("Since Endpoints of Service %s exceeds %d, extra Endpoints will be dropped", svcPortName.String(), maxEndpoints)
-				p.oversizeServiceSet.Insert(svcPortName.String())
-			}
-			// If the length of endpoints > maxEndpoints, endpoints should be cut. However, since endpoints is a map, iterate
-			// the map and append every Endpoint to a target slice. When the Endpoint is local, append Endpoint to slice
-			// localEndpointList, otherwise append the Endpoint to slice remoteEndpointList. Since the iteration order
-			// of map in Golang is not guaranteed, if split the Endpoints directly without any sorting, some Endpoints
-			// may not be installed, so split the endpointList after sorting.
-			var remoteEndpointList, localEndpointList []k8sproxy.Endpoint
-			for _, endpoint := range endpoints {
-				if endpoint.GetIsLocal() {
-					localEndpointList = append(localEndpointList, endpoint)
-				} else {
-					remoteEndpointList = append(remoteEndpointList, endpoint)
+		// Check if there is any installed Endpoint which is not expected anymore. If internalTrafficPolicy and externalTrafficPolicy
+		// are both Local, only local Endpoints should be installed and checked; if internalTrafficPolicy or externalTrafficPolicy
+		// is Cluster, all Endpoints should be installed and checked.
+		for _, endpoint := range endpoints {
+			if internalNodeLocal && externalNodeLocal && endpoint.GetIsLocal() || !internalNodeLocal || !externalNodeLocal {
+				if _, ok := endpointsInstalled[endpoint.String()]; !ok { // There is an expected Endpoint which is not installed.
+					needUpdateEndpoints = true
 				}
 			}
-
-			sort.Sort(byEndpoint(remoteEndpointList))
-			sort.Sort(byEndpoint(localEndpointList))
-
-			if len(localEndpointList) > maxEndpoints {
-				// When the number of local Endpoints is greater than maxEndpoints, choose maxEndpoints Endpoints from
-				// localEndpointList to install.
-				allEndpointUpdateList = localEndpointList[:maxEndpoints]
-			} else {
-				// When the number of local Endpoints is smaller than maxEndpoints, choose all Endpoints of localEndpointList
-				// and part of remoteEndpointList to install.
-				localEndpointUpdateList = localEndpointList
-				allEndpointUpdateList = append(localEndpointList, remoteEndpointList[:maxEndpoints-len(localEndpointList)]...)
-			}
-			// Check if there is any installed Endpoint which is not expected anymore. If internalTrafficPolicy and externalTrafficPolicy
-			// are both Local, only local Endpoints should be installed and checked; if internalTrafficPolicy or externalTrafficPolicy
-			// is Cluster, all Endpoints should be installed and checked.
-			for _, endpoint := range allEndpointUpdateList {
-				if internalNodeLocal && externalNodeLocal && endpoint.GetIsLocal() || !internalNodeLocal || !externalNodeLocal {
-					if _, ok := endpointsInstalled[endpoint.String()]; !ok { // There is an expected Endpoint which is not installed.
-						needUpdateEndpoints = true
-						break
-					}
-				}
-			}
-		} else {
-			if p.oversizeServiceSet.Has(svcPortName.String()) {
-				p.oversizeServiceSet.Delete(svcPortName.String())
-			}
-			// Check if there is any installed Endpoint which is not expected anymore. If internalTrafficPolicy and externalTrafficPolicy
-			// are both Local, only local Endpoints should be installed and checked; if internalTrafficPolicy or externalTrafficPolicy
-			// is Cluster, all Endpoints should be installed and checked.
-			for _, endpoint := range endpoints {
-				if internalNodeLocal && externalNodeLocal && endpoint.GetIsLocal() || !internalNodeLocal || !externalNodeLocal {
-					if _, ok := endpointsInstalled[endpoint.String()]; !ok { // There is an expected Endpoint which is not installed.
-						needUpdateEndpoints = true
-					}
-				}
-				allEndpointUpdateList = append(allEndpointUpdateList, endpoint)
-				if endpoint.GetIsLocal() {
-					localEndpointUpdateList = append(localEndpointUpdateList, endpoint)
-				}
+			allEndpointUpdateList = append(allEndpointUpdateList, endpoint)
+			if endpoint.GetIsLocal() {
+				localEndpointUpdateList = append(localEndpointUpdateList, endpoint)
 			}
 		}
 
@@ -563,7 +507,7 @@ func (p *proxier) installServices() {
 					continue
 				}
 				if groupID, exist := p.groupCounter.Get(svcPortName, !nodeLocalVal); exist {
-					if err := p.ofClient.UninstallGroup(groupID); err != nil {
+					if err := p.ofClient.UninstallServiceGroup(groupID); err != nil {
 						klog.ErrorS(err, "Failed to uninstall Group of all Endpoints for Service", "Service", svcPortName)
 						continue
 					}
@@ -698,12 +642,21 @@ func (p *proxier) syncProxyRules() {
 	// GetServiceFlowKeys().
 	p.serviceEndpointsMapsMutex.Lock()
 	defer p.serviceEndpointsMapsMutex.Unlock()
-	p.endpointsChanges.Update(p.endpointsMap)
-	p.serviceChanges.Update(p.serviceMap)
+	p.endpointsChanges.Update(p.endpointsMap, p.numLocalEndpoints)
+	serviceUpdateResult := p.serviceChanges.Update(p.serviceMap)
 
 	p.removeStaleServices()
 	p.installServices()
 	p.removeStaleEndpoints()
+
+	if p.serviceHealthServer != nil {
+		if err := p.serviceHealthServer.SyncServices(serviceUpdateResult.HCServiceNodePorts); err != nil {
+			klog.ErrorS(err, "Error syncing healthcheck Services")
+		}
+		if err := p.serviceHealthServer.SyncEndpoints(p.numLocalEndpoints); err != nil {
+			klog.ErrorS(err, "Error syncing healthcheck Endpoints")
+		}
+	}
 
 	counter := 0
 	for _, endpoints := range p.endpointsMap {
@@ -908,7 +861,7 @@ func (p *proxier) GetProxyProvider() k8sproxy.Provider {
 }
 
 func (p *proxier) GetServiceFlowKeys(serviceName, namespace string) ([]string, []binding.GroupIDType, bool) {
-	namespacedName := k8sapitypes.NamespacedName{Namespace: namespace, Name: serviceName}
+	namespacedName := apimachinerytypes.NamespacedName{Namespace: namespace, Name: serviceName}
 	p.serviceEndpointsMapsMutex.Lock()
 	defer p.serviceEndpointsMapsMutex.Unlock()
 
@@ -976,6 +929,15 @@ func NewProxier(
 		ipFamily = corev1.IPv6Protocol
 	}
 
+	var serviceHealthServer healthcheck.ServiceHealthServer
+	if proxyAllEnabled {
+		nodePortAddressesString := make([]string, len(nodePortAddresses))
+		for i, address := range nodePortAddresses {
+			nodePortAddressesString[i] = address.String()
+		}
+		serviceHealthServer = healthcheck.NewServiceHealthServer(hostname, nil, nodePortAddressesString)
+	}
+
 	p := &proxier{
 		endpointsConfig:           config.NewEndpointsConfig(informerFactory.Core().V1().Endpoints(), resyncPeriod),
 		serviceConfig:             config.NewServiceConfig(informerFactory.Core().V1().Services(), resyncPeriod),
@@ -988,7 +950,6 @@ func NewProxier(
 		endpointReferenceCounter:  map[string]int{},
 		nodeLabels:                map[string]string{},
 		serviceStringMap:          map[string]k8sproxy.ServicePortName{},
-		oversizeServiceSet:        sets.NewString(),
 		groupCounter:              groupCounter,
 		ofClient:                  ofClient,
 		routeClient:               routeClient,
@@ -999,6 +960,8 @@ func NewProxier(
 		topologyAwareHintsEnabled: topologyAwareHintsEnabled,
 		proxyLoadBalancerIPs:      proxyLoadBalancerIPs,
 		hostname:                  hostname,
+		serviceHealthServer:       serviceHealthServer,
+		numLocalEndpoints:         map[apimachinerytypes.NamespacedName]int{},
 	}
 
 	p.serviceConfig.RegisterEventHandler(p)

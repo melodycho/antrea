@@ -44,7 +44,7 @@ func (pc *podConfigurator) connectInterfaceToOVSAsync(ifConfig *interfacestore.I
 		}
 		containerID := ifConfig.ContainerID
 		klog.V(2).Infof("Setting up Openflow entries for container %s", containerID)
-		if err := pc.ofClient.InstallPodFlows(ovsPortName, ifConfig.IPs, ifConfig.MAC, uint32(ofPort), ifConfig.VLANID); err != nil {
+		if err := pc.ofClient.InstallPodFlows(ovsPortName, ifConfig.IPs, ifConfig.MAC, uint32(ofPort), ifConfig.VLANID, nil); err != nil {
 			return fmt.Errorf("failed to add Openflow entries for container %s: %v", containerID, err)
 		}
 		// Update interface config with the ofPort.
@@ -86,7 +86,7 @@ func (pc *podConfigurator) connectInterfaceToOVS(
 	//   If one day Containerd runtime changes the behavior and container interface can be created when attaching
 	//   HNSEndpoint/HostComputeEndpoint, the current implementation will still work. It will choose the synchronized
 	//   way to create OVS port.
-	if util.HostInterfaceExists(hostIfAlias) {
+	if hostInterfaceExistsFunc(hostIfAlias) {
 		return containerConfig, pc.connectInterfaceToOVSCommon(ovsPortName, containerConfig)
 	}
 	klog.V(2).Infof("Adding OVS port %s for container %s", ovsPortName, containerID)

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package flowaggregator
 
 import (
 	"time"
@@ -26,12 +26,16 @@ const (
 	DefaultActiveFlowRecordTimeout        = "60s"
 	DefaultInactiveFlowRecordTimeout      = "90s"
 	DefaultAggregatorTransportProtocol    = "TLS"
-	DefaultFlowAggregatorAddress          = "flow-aggregator.flow-aggregator.svc"
 	DefaultRecordFormat                   = "IPFIX"
 	DefaultClickHouseDatabase             = "default"
 	DefaultClickHouseCommitInterval       = "8s"
 	MinClickHouseCommitInterval           = 1 * time.Second
 	DefaultClickHouseDatabaseUrl          = "tcp://clickhouse-clickhouse.flow-visibility.svc:9000"
+	DefaultS3Region                       = "us-west-2"
+	DefaultS3RecordFormat                 = "CSV"
+	DefaultS3MaxRecordsPerFile            = 1000000
+	DefaultS3UploadInterval               = "60s"
+	MinS3CommitInterval                   = 1 * time.Second
 )
 
 func SetConfigDefaults(flowAggregatorConf *FlowAggregatorConfig) {
@@ -43,9 +47,6 @@ func SetConfigDefaults(flowAggregatorConf *FlowAggregatorConfig) {
 	}
 	if flowAggregatorConf.AggregatorTransportProtocol == "" {
 		flowAggregatorConf.AggregatorTransportProtocol = DefaultAggregatorTransportProtocol
-	}
-	if flowAggregatorConf.FlowAggregatorAddress == "" {
-		flowAggregatorConf.FlowAggregatorAddress = DefaultFlowAggregatorAddress
 	}
 	if flowAggregatorConf.APIServer.APIPort == 0 {
 		flowAggregatorConf.APIServer.APIPort = apis.FlowAggregatorAPIPort
@@ -65,5 +66,18 @@ func SetConfigDefaults(flowAggregatorConf *FlowAggregatorConfig) {
 	}
 	if flowAggregatorConf.ClickHouse.CommitInterval == "" {
 		flowAggregatorConf.ClickHouse.CommitInterval = DefaultClickHouseCommitInterval
+	}
+	if flowAggregatorConf.S3Uploader.Compress == nil {
+		flowAggregatorConf.S3Uploader.Compress = new(bool)
+		*flowAggregatorConf.S3Uploader.Compress = true
+	}
+	if flowAggregatorConf.S3Uploader.MaxRecordsPerFile == 0 {
+		flowAggregatorConf.S3Uploader.MaxRecordsPerFile = DefaultS3MaxRecordsPerFile
+	}
+	if flowAggregatorConf.S3Uploader.RecordFormat == "" {
+		flowAggregatorConf.S3Uploader.RecordFormat = DefaultS3RecordFormat
+	}
+	if flowAggregatorConf.S3Uploader.UploadInterval == "" {
+		flowAggregatorConf.S3Uploader.UploadInterval = DefaultS3UploadInterval
 	}
 }

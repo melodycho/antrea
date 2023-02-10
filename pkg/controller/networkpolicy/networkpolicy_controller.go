@@ -54,10 +54,12 @@ import (
 	seclisters "antrea.io/antrea/pkg/client/listers/crd/v1alpha1"
 	crdv1a3listers "antrea.io/antrea/pkg/client/listers/crd/v1alpha3"
 	"antrea.io/antrea/pkg/controller/grouping"
+	"antrea.io/antrea/pkg/controller/labelidentity"
 	"antrea.io/antrea/pkg/controller/metrics"
 	"antrea.io/antrea/pkg/controller/networkpolicy/store"
 	antreatypes "antrea.io/antrea/pkg/controller/types"
 	"antrea.io/antrea/pkg/features"
+	"antrea.io/antrea/pkg/util/externalnode"
 	"antrea.io/antrea/pkg/util/k8s"
 	utilsets "antrea.io/antrea/pkg/util/sets"
 )
@@ -229,13 +231,18 @@ type NetworkPolicyController struct {
 	// synced.
 	internalGroupQueue workqueue.RateLimitingInterface
 
-	// internalNetworkPolicyMutex protects the internalNetworkPolicyStore from
-	// concurrent access during updates to the internal NetworkPolicy object.
+	// internalNetworkPolicyMutex prevents concurrent processing of internal networkpolicies who refer
+	// to the same addressgroups/appliedtogroups.
 	internalNetworkPolicyMutex sync.RWMutex
 
 	groupingInterface grouping.Interface
 	// Added as a member to the struct to allow injection for testing.
 	groupingInterfaceSynced func() bool
+
+	labelIdentityInterface labelidentity.Interface
+	// Enable Stretched Networkpolicy feature which allows Antrea-native policies to select peer
+	// from other clusters in a ClusterSet.
+	stretchNPEnabled bool
 	// heartbeatCh is an internal channel for testing. It's used to know whether all tasks have been
 	// processed, and to count executions of each function.
 	heartbeatCh chan heartbeat
@@ -370,6 +377,7 @@ var anpIndexers = cache.Indexers{
 func NewNetworkPolicyController(kubeClient clientset.Interface,
 	crdClient versioned.Interface,
 	groupingInterface grouping.Interface,
+	labelIdentityInterface labelidentity.Interface,
 	namespaceInformer coreinformers.NamespaceInformer,
 	serviceInformer coreinformers.ServiceInformer,
 	networkPolicyInformer networkinginformers.NetworkPolicyInformer,
@@ -382,7 +390,8 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 	addressGroupStore storage.Interface,
 	appliedToGroupStore storage.Interface,
 	internalNetworkPolicyStore storage.Interface,
-	internalGroupStore storage.Interface) *NetworkPolicyController {
+	internalGroupStore storage.Interface,
+	stretchedNPEnabled bool) *NetworkPolicyController {
 	n := &NetworkPolicyController{
 		kubeClient:                 kubeClient,
 		crdClient:                  crdClient,
@@ -399,10 +408,13 @@ func NewNetworkPolicyController(kubeClient clientset.Interface,
 		internalGroupQueue:         workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "internalGroup"),
 		groupingInterface:          groupingInterface,
 		groupingInterfaceSynced:    groupingInterface.HasSynced,
+		labelIdentityInterface:     labelIdentityInterface,
+		stretchNPEnabled:           stretchedNPEnabled,
 	}
 	n.groupingInterface.AddEventHandler(appliedToGroupType, n.enqueueAppliedToGroup)
 	n.groupingInterface.AddEventHandler(addressGroupType, n.enqueueAddressGroup)
 	n.groupingInterface.AddEventHandler(internalGroupType, n.enqueueInternalGroup)
+	n.labelIdentityInterface.AddEventHandler(n.triggerPolicyResyncForLabelIdentityUpdates)
 	// Add handlers for NetworkPolicy events.
 	networkPolicyInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
@@ -1272,17 +1284,18 @@ func (n *NetworkPolicyController) syncAppliedToGroup(key string) error {
 				appGroupNodeNames.Insert(pod.Spec.NodeName)
 			}
 			for _, extEntity := range externalEntities {
-				if extEntity.Spec.ExternalNode == "" {
+				entityNodeKey := externalnode.GenerateEntityNodeKey(extEntity)
+				if entityNodeKey == "" {
 					continue
 				}
 				scheduledExtEntityNum++
-				entitySet := memberSetByNode[extEntity.Spec.ExternalNode]
+				entitySet := memberSetByNode[entityNodeKey]
 				if entitySet == nil {
 					entitySet = controlplane.GroupMemberSet{}
 				}
 				entitySet.Insert(externalEntityToGroupMember(extEntity, false))
-				memberSetByNode[extEntity.Spec.ExternalNode] = entitySet
-				appGroupNodeNames.Insert(extEntity.Spec.ExternalNode)
+				memberSetByNode[entityNodeKey] = entitySet
+				appGroupNodeNames.Insert(entityNodeKey)
 			}
 			updatedAppliedToGroup = &antreatypes.AppliedToGroup{
 				UID:               appliedToGroup.UID,
@@ -1382,6 +1395,15 @@ func (n *NetworkPolicyController) getInternalGroupWorkloads(group *antreatypes.G
 		}
 	}
 	return pods, ees, nil
+}
+
+func (n *NetworkPolicyController) triggerPolicyResyncForLabelIdentityUpdates(key string) {
+	klog.V(2).InfoS("Resyncing policy for LabelIdentity events", "policy", key)
+	internalNPObj, found, _ := n.internalNetworkPolicyStore.Get(key)
+	if !found {
+		return
+	}
+	n.enqueueInternalNetworkPolicy(internalNPObj.(*antreatypes.NetworkPolicy).SourceRef)
 }
 
 // syncInternalNetworkPolicy retrieves all the AppliedToGroups associated with
@@ -1548,7 +1570,9 @@ func (n *NetworkPolicyController) deleteInternalNetworkPolicy(name string) {
 	internalNetworkPolicy := obj.(*antreatypes.NetworkPolicy)
 	n.internalNetworkPolicyStore.Delete(internalNetworkPolicy.Name)
 	n.cleanupOrphanGroups(internalNetworkPolicy)
-
+	if n.stretchNPEnabled && internalNetworkPolicy.SourceRef.Type != controlplane.K8sNetworkPolicy {
+		n.labelIdentityInterface.DeletePolicySelectors(internalNetworkPolicy.Name)
+	}
 	// Enqueue AddressGroups previously used by this NetworkPolicy as their span may change due to the removal.
 	for agName := range internalNetworkPolicy.GetAddressGroups() {
 		n.enqueueAddressGroup(agName)

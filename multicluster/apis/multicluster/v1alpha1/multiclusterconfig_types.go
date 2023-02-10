@@ -41,9 +41,22 @@ type MultiClusterConfig struct {
 	config.ControllerManagerConfigurationSpec `json:",inline"`
 	// ServiceCIDR allows user to set the ClusterIP range of the cluster manually.
 	ServiceCIDR string `json:"serviceCIDR,omitempty"`
+	// PodCIDRs is the Pod IP address CIDRs.
+	PodCIDRs []string `json:"podCIDRs,omitempty"`
 	// The precedence about which IP address (internal or external IP) of Node is preferred to
 	// be used as the cross-cluster tunnel endpoint. if not specified, internal IP will be chosen.
 	GatewayIPPrecedence Precedence `json:"gatewayIPPrecedence,omitempty"`
+	// The type of IP address (ClusterIP or PodIP) to be used as the Multi-cluster
+	// Services' Endpoints. Defaults to ClusterIP. All member clusters should use the same type
+	// in a ClusterSet. Existing ServiceExports should be re-exported after changing
+	// EndpointIPType. ClusterIP type requires that Multi-cluster Gateway is configured.
+	// PodIP type requires Multi-cluster Gateway too when there is no direct Pod-to-Pod
+	// connectivity across member clusters.
+	EndpointIPType string `json:"endpointIPType,omitempty"`
+	// Enable StretchedNetworkPolicy which will export and import labelIdentities in the
+	// ClusterSet and allow Antrea-native policies to select peers from other clusters
+	// in a ClusterSet.
+	EnableStretchedNetworkPolicy bool `json:"enableStretchedNetworkPolicy,omitempty"`
 }
 
 func init() {

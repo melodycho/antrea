@@ -33,16 +33,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// GetNetLink returns dev link from name.
-func GetNetLink(dev string) netlink.Link {
-	link, err := netlink.LinkByName(dev)
-	if err != nil {
-		klog.Errorf("Failed to find dev %s: %v", dev, err)
-		return nil
-	}
-	return link
-}
-
 // GetNSPeerDevBridge returns peer device and its attached bridge (if applicable)
 // for device dev in network space indicated by nsPath
 func GetNSPeerDevBridge(nsPath, dev string) (*net.Interface, string, error) {
@@ -157,8 +147,10 @@ func addrSliceDifference(s1, s2 []netlink.Addr) []*netlink.Addr {
 // they are missing from the interface. Any other existing address already configured for the
 // interface will be removed, unless it is a link-local address.
 func ConfigureLinkAddresses(idx int, ipNets []*net.IPNet) error {
-	// No need to check the error here, since the link is found in previous steps.
-	link, _ := netlink.LinkByIndex(idx)
+	link, err := netlink.LinkByIndex(idx)
+	if err != nil {
+		return err
+	}
 	ifaceName := link.Attrs().Name
 	var newAddrs []netlink.Addr
 	for _, ipNet := range ipNets {

@@ -51,11 +51,11 @@ const (
 // to construct a complete rule that can be used by reconciler to enforce.
 // The K8s NetworkPolicy object doesn't provide ID for its rule, here we
 // calculate an ID based on the rule's fields. That means:
-// 1. If a rule's selector/services/direction changes, it becomes "another" rule.
-// 2. If inserting rules before a rule or shuffling rules in a NetworkPolicy, we
-//    can know the existing rules don't change and skip processing them. Note that
-//    if a CNP/ANP rule's position (from top down) within a networkpolicy changes, it
-//    affects the Priority of the rule.
+//  1. If a rule's selector/services/direction changes, it becomes "another" rule.
+//  2. If inserting rules before a rule or shuffling rules in a NetworkPolicy, we
+//     can know the existing rules don't change and skip processing them. Note that
+//     if a CNP/ANP rule's position (from top down) within a networkpolicy changes, it
+//     affects the Priority of the rule.
 type rule struct {
 	// ID is calculated from the hash value of all other fields.
 	ID string
@@ -67,6 +67,8 @@ type rule struct {
 	To v1beta.NetworkPolicyPeer
 	// Protocols and Ports of this rule.
 	Services []v1beta.Service
+	// Layer 7 protocols of this rule.
+	L7Protocols []v1beta.L7Protocol
 	// Name of this rule. Empty for k8s NetworkPolicy.
 	Name string
 	// Action of this rule. nil for k8s NetworkPolicy.
@@ -146,6 +148,8 @@ type CompletedRule struct {
 	ToAddresses v1beta.GroupMemberSet
 	// Target GroupMembers of this rule.
 	TargetMembers v1beta.GroupMemberSet
+	// Vlan ID allocated for this rule if this rule is for L7 NetworkPolicy.
+	L7RuleVlanID *uint32
 }
 
 // String returns the string representation of the CompletedRule.
@@ -673,6 +677,7 @@ func toRule(r *v1beta.NetworkPolicyRule, policy *v1beta.NetworkPolicy, maxPriori
 		From:            r.From,
 		To:              r.To,
 		Services:        r.Services,
+		L7Protocols:     r.L7Protocols,
 		Action:          r.Action,
 		Priority:        r.Priority,
 		PolicyPriority:  policy.Priority,
@@ -772,11 +777,12 @@ func (c *ruleCache) updateNetworkPolicyLocked(policy *v1beta.NetworkPolicy) bool
 	for i := range policy.Rules {
 		r := toRule(&policy.Rules[i], policy, maxPriority)
 		if _, exists := ruleByID[r.ID]; exists {
-			// If rule already exists, remove it from the map so the ones left finally are orphaned.
-			klog.V(2).Infof("Rule %v was not changed", r.ID)
+			// If rule already exists, remove it from the map so the ones left are orphaned,
+			// which means those rules need to be handled by dirtyRuleHandler.
+			klog.V(2).InfoS("Rule was not changed", "id", r.ID)
 			delete(ruleByID, r.ID)
 		} else {
-			// If rule doesn't exist, add it to cache, mark it as dirty.
+			// If rule doesn't exist, add it to cache and mark it as dirty.
 			c.rules.Add(r)
 			// Count up antrea_agent_ingress_networkpolicy_rule_count or antrea_agent_egress_networkpolicy_rule_count
 			if r.Direction == v1beta.DirectionIn {
@@ -841,6 +847,7 @@ func (c *ruleCache) deleteNetworkPolicyLocked(uid string) {
 //   - The original policy has multiple AppliedToGroups and some AppliedToGroups' span does not include this Node.
 //   - The original policy is appliedTo-per-rule, and some of the rule's AppliedToGroups do not include this Node.
 //   - The original policy is appliedTo-per-rule, none of the rule's AppliedToGroups includes this Node, but some other rules' (in the same policy) AppliedToGroups include this Node.
+//
 // In these cases, it is not guaranteed that all AppliedToGroups in the rule will eventually be present in the cache.
 // Only the AppliedToGroups whose span includes this Node will eventually be received.
 func (c *ruleCache) GetCompletedRule(ruleID string) (completedRule *CompletedRule, effective bool, realizable bool) {

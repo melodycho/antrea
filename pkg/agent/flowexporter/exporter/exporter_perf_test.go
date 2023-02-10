@@ -19,6 +19,7 @@ package exporter
 
 import (
 	"container/heap"
+	"context"
 	"crypto/rand"
 	"flag"
 	"fmt"
@@ -57,20 +58,23 @@ goarch: amd64
 pkg: antrea.io/antrea/pkg/agent/flowexporter/exporter
 cpu: Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz
 BenchmarkExportConntrackConns
-    exporter_perf_test.go:95:
-        Summary:
-        Number of conntrack connections: 20000
-        Number of dying conntrack connections: 2000
-        Total connections received: 19564
-    exporter_perf_test.go:95:
-        Summary:
-        Number of conntrack connections: 20000
-        Number of dying conntrack connections: 2000
-        Total connections received: 18259
+
+	exporter_perf_test.go:95:
+	    Summary:
+	    Number of conntrack connections: 20000
+	    Number of dying conntrack connections: 2000
+	    Total connections received: 19564
+	exporter_perf_test.go:95:
+	    Summary:
+	    Number of conntrack connections: 20000
+	    Number of dying conntrack connections: 2000
+	    Total connections received: 18259
+
 BenchmarkExportConntrackConns-2   	     100	   3174982 ns/op	  328104 B/op	    3262 allocs/op
 PASS
 ok  	antrea.io/antrea/pkg/agent/flowexporter/exporter	1.249s
 Reference value:
+
 	#conns
 	20000     100	   3174982 ns/op	  328104 B/op	    3262 allocs/op
 	30000     100	   5074667 ns/op	  489624 B/op	    4874 allocs/op
@@ -89,7 +93,7 @@ func BenchmarkExportConntrackConns(b *testing.B) {
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		exp.initFlowExporter()
+		exp.initFlowExporter(context.Background())
 		for i := 0; i < int(math.Ceil(testNumOfConns/maxConnsToExport)); i++ {
 			exp.sendFlowRecords()
 		}
@@ -105,20 +109,23 @@ goarch: amd64
 pkg: antrea.io/antrea/pkg/agent/flowexporter/exporter
 cpu: Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz
 BenchmarkExportDenyConns
-    exporter_perf_test.go:143:
-        Summary:
-        Number of deny connections: 20000
-        Number of idle deny connections: 2000
-        Total connections received: 19218
-    exporter_perf_test.go:143:
-        Summary:
-        Number of deny connections: 20000
-        Number of idle deny connections: 2000
-        Total connections received: 19237
+
+	exporter_perf_test.go:143:
+	    Summary:
+	    Number of deny connections: 20000
+	    Number of idle deny connections: 2000
+	    Total connections received: 19218
+	exporter_perf_test.go:143:
+	    Summary:
+	    Number of deny connections: 20000
+	    Number of idle deny connections: 2000
+	    Total connections received: 19237
+
 BenchmarkExportDenyConns-2   	     100	   3133778 ns/op	  322203 B/op	    3474 allocs/op
 PASS
 ok  	antrea.io/antrea/pkg/agent/flowexporter/exporter	1.238s
 Reference value:
+
 	#conns
 	20000   100	   3133778 ns/op	  322203 B/op	    3474 allocs/op
 	30000   100	   4813561 ns/op	  480075 B/op	    5175 allocs/op
@@ -137,7 +144,7 @@ func BenchmarkExportDenyConns(b *testing.B) {
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		exp.initFlowExporter()
+		exp.initFlowExporter(context.Background())
 		for i := 0; i < int(math.Ceil(testNumOfDenyConns/maxConnsToExport)); i++ {
 			exp.sendFlowRecords()
 		}
@@ -153,7 +160,7 @@ func NewFlowExporterForTest(o *flowexporter.FlowExporterOptions) *FlowExporter {
 
 	// Prepare input args for IPFIX exporting process.
 	nodeName := "test-node"
-	expInput := prepareExporterInputArgs(o.FlowCollectorAddr, o.FlowCollectorProto, nodeName)
+	expInput := prepareExporterInputArgs(o.FlowCollectorProto, nodeName)
 
 	v4Enabled := true
 	v6Enabled := false
@@ -162,6 +169,7 @@ func NewFlowExporterForTest(o *flowexporter.FlowExporterOptions) *FlowExporter {
 	conntrackConnStore := connections.NewConntrackConnectionStore(nil, v4Enabled, v6Enabled, nil, nil, nil, o)
 
 	return &FlowExporter{
+		collectorAddr:          o.FlowCollectorAddr,
 		conntrackConnStore:     conntrackConnStore,
 		denyConnStore:          denyConnStore,
 		registry:               registry,

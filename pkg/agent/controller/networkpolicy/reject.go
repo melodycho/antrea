@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"antrea.io/libOpenflow/openflow15"
 	"antrea.io/libOpenflow/protocol"
 	"antrea.io/ofnet/ofctrl"
 
@@ -165,14 +164,8 @@ func (c *Controller) rejectRequest(pktIn *ofctrl.PacketIn) error {
 		srcMAC = sIface.MAC.String()
 		dstMAC = dIface.MAC.String()
 	}
-	tunPort := c.tunPort
-	if tunPort == 0 {
-		// openflow15.P_CONTROLLER is used with noEncap mode when tunnel interface is not found.
-		// It won't cause a loop with openflow15.P_CONTROLLER because it is used as the input port but not output port
-		// in the packet out message.
-		tunPort = uint32(openflow15.P_CONTROLLER)
-	}
-	inPort, outPort := getRejectOFPorts(packetOutType, sIface, dIface, c.gwPort, tunPort)
+
+	inPort, outPort := getRejectOFPorts(packetOutType, sIface, dIface, c.gwPort, c.tunPort)
 	mutateFunc := getRejectPacketOutMutateFunc(packetOutType, c.nodeType)
 
 	if proto == protocol.Type_TCP {
@@ -289,21 +282,35 @@ func getRejectOFPorts(rejectType RejectType, sIface, dIface *interfacestore.Inte
 		outPort = gwOFPort
 	case RejectNoAPServiceRemoteToLocal:
 		inPort = tunOFPort
+		if inPort == 0 {
+			// If tunnel interface is not found, which means we are in noEncap mode, then use
+			// gateway port as inPort.
+			inPort = gwOFPort
+		}
 		outPort = gwOFPort
 	case RejectServiceRemoteToExternal:
 		inPort = tunOFPort
+		if inPort == 0 {
+			// If tunnel interface is not found, which means we are in noEncap mode, then use
+			// gateway port as inPort.
+			inPort = gwOFPort
+		}
 	}
 	return inPort, outPort
 }
 
-// getRejectPacketOutMutateFunc returns the mutate func of a packetOut based on the RejectType.
+// getRejectPacketOutMutateFunc returns the mutate-func of a packetOut based on the RejectType.
 func getRejectPacketOutMutateFunc(rejectType RejectType, nodeType config.NodeType) func(binding.PacketOutBuilder) binding.PacketOutBuilder {
 	var mutatePacketOut func(binding.PacketOutBuilder) binding.PacketOutBuilder
+	mutatePacketOut = func(packetOutBuilder binding.PacketOutBuilder) binding.PacketOutBuilder {
+		return packetOutBuilder.AddLoadRegMark(openflow.CustomReasonRejectRegMark)
+	}
 	switch rejectType {
 	case RejectServiceLocal:
 		tableID := openflow.ConntrackTable.GetID()
 		mutatePacketOut = func(packetOutBuilder binding.PacketOutBuilder) binding.PacketOutBuilder {
-			return packetOutBuilder.AddResubmitAction(nil, &tableID)
+			return packetOutBuilder.AddLoadRegMark(openflow.CustomReasonRejectRegMark).
+				AddResubmitAction(nil, &tableID)
 		}
 	case RejectLocalToRemote:
 		tableID := openflow.L3ForwardingTable.GetID()
@@ -312,7 +319,8 @@ func getRejectPacketOutMutateFunc(rejectType RejectType, nodeType config.NodeTyp
 			tableID = openflow.L2ForwardingCalcTable.GetID()
 		}
 		mutatePacketOut = func(packetOutBuilder binding.PacketOutBuilder) binding.PacketOutBuilder {
-			return packetOutBuilder.AddResubmitAction(nil, &tableID)
+			return packetOutBuilder.AddLoadRegMark(openflow.CustomReasonRejectRegMark).
+				AddResubmitAction(nil, &tableID)
 		}
 	}
 	return mutatePacketOut

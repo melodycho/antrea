@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -93,8 +93,11 @@ var (
 	newIPFIXExporter = func(k8sClient kubernetes.Interface, opt *options.Options, registry ipfix.IPFIXRegistry) exporter.Interface {
 		return exporter.NewIPFIXExporter(k8sClient, opt, registry)
 	}
-	newClickHouseExporter = func(opt *options.Options) (exporter.Interface, error) {
-		return exporter.NewClickHouseExporter(opt)
+	newClickHouseExporter = func(k8sClient kubernetes.Interface, opt *options.Options) (exporter.Interface, error) {
+		return exporter.NewClickHouseExporter(k8sClient, opt)
+	}
+	newS3Exporter = func(k8sClient kubernetes.Interface, opt *options.Options) (exporter.Interface, error) {
+		return exporter.NewS3Exporter(k8sClient, opt)
 	}
 )
 
@@ -110,7 +113,6 @@ type flowAggregator struct {
 	k8sClient                   kubernetes.Interface
 	podInformer                 coreinformers.PodInformer
 	numRecordsExported          int64
-	numRecordsReceived          int64
 	updateCh                    chan *options.Options
 	configFile                  string
 	configWatcher               *fsnotify.Watcher
@@ -118,6 +120,7 @@ type flowAggregator struct {
 	APIServer                   flowaggregatorconfig.APIServerConfig
 	ipfixExporter               exporter.Interface
 	clickHouseExporter          exporter.Interface
+	s3Exporter                  exporter.Interface
 	logTickerDuration           time.Duration
 }
 
@@ -144,7 +147,7 @@ func NewFlowAggregator(
 		return nil, fmt.Errorf("error when starting file watch on configuration dir: %v", err)
 	}
 
-	data, err := ioutil.ReadFile(configFile)
+	data, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read FlowAggregator configuration file: %v", err)
 	}
@@ -179,9 +182,16 @@ func NewFlowAggregator(
 	}
 	if opt.Config.ClickHouse.Enable {
 		var err error
-		fa.clickHouseExporter, err = newClickHouseExporter(opt)
+		fa.clickHouseExporter, err = newClickHouseExporter(k8sClient, opt)
 		if err != nil {
 			return nil, fmt.Errorf("error when creating ClickHouse export process: %v", err)
+		}
+	}
+	if opt.Config.S3Uploader.Enable {
+		var err error
+		fa.s3Exporter, err = newS3Exporter(k8sClient, opt)
+		if err != nil {
+			return nil, fmt.Errorf("error when creating S3 export process: %v", err)
 		}
 	}
 	if opt.Config.FlowCollector.Enable {
@@ -256,7 +266,7 @@ func (fa *flowAggregator) InitCollectingProcess() error {
 	cpInput.NumExtraElements = len(infoelements.AntreaSourceStatsElementList) + len(infoelements.AntreaDestinationStatsElementList) + len(infoelements.AntreaLabelsElementList) +
 		len(infoelements.AntreaFlowEndSecondsElementList) + len(infoelements.AntreaThroughputElementList) + len(infoelements.AntreaSourceThroughputElementList) + len(infoelements.AntreaDestinationThroughputElementList)
 	var err error
-	fa.collectingProcess, err = ipfix.NewIPFIXCollectingProcess(cpInput)
+	fa.collectingProcess, err = collector.InitCollectingProcess(cpInput)
 	return err
 }
 
@@ -270,7 +280,7 @@ func (fa *flowAggregator) InitAggregationProcess() error {
 		InactiveExpiryTimeout: fa.inactiveFlowRecordTimeout,
 		AggregateElements:     aggregationElements,
 	}
-	fa.aggregationProcess, err = ipfix.NewIPFIXAggregationProcess(apInput)
+	fa.aggregationProcess, err = ipfixintermediate.InitAggregationProcess(apInput)
 	return err
 }
 
@@ -285,6 +295,9 @@ func (fa *flowAggregator) Run(stopCh <-chan struct{}) {
 	if fa.clickHouseExporter != nil {
 		fa.clickHouseExporter.Start()
 	}
+	if fa.s3Exporter != nil {
+		fa.s3Exporter.Start()
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -294,7 +307,19 @@ func (fa *flowAggregator) Run(stopCh <-chan struct{}) {
 		defer wg.Done()
 		fa.flowExportLoop(stopCh)
 	}()
-	go fa.watchConfiguration(stopCh)
+	wg.Add(1)
+	go func() {
+		// there is no strong reason to wait for this function to return
+		// on stop, but it does seem like the best thing to do.
+		defer wg.Done()
+		fa.watchConfiguration(stopCh)
+		// the watcher should not be closed until watchConfiguration returns.
+		// note that it is safe to close an fsnotify watcher multiple times,
+		// for example:
+		// https://github.com/fsnotify/fsnotify/blob/v1.6.0/backend_inotify.go#L184
+		// in practice, this should only happen during unit tests.
+		fa.configWatcher.Close()
+	}()
 	<-stopCh
 	wg.Wait()
 }
@@ -316,6 +341,9 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 		}
 		if fa.clickHouseExporter != nil {
 			fa.clickHouseExporter.Stop()
+		}
+		if fa.s3Exporter != nil {
+			fa.s3Exporter.Stop()
 		}
 	}()
 	updateCh := fa.updateCh
@@ -357,11 +385,11 @@ func (fa *flowAggregator) sendFlowKeyRecord(key ipfixintermediate.FlowKey, recor
 	isRecordIPv4 := fa.aggregationProcess.IsAggregatedRecordIPv4(*record)
 	if !fa.aggregationProcess.AreCorrelatedFieldsFilled(*record) {
 		fa.fillK8sMetadata(key, record.Record)
-		fa.aggregationProcess.SetCorrelatedFieldsFilled(record)
+		fa.aggregationProcess.SetCorrelatedFieldsFilled(record, true)
 	}
 	if fa.includePodLabels && !fa.aggregationProcess.AreExternalFieldsFilled(*record) {
 		fa.fillPodLabels(key, record.Record)
-		fa.aggregationProcess.SetExternalFieldsFilled(record)
+		fa.aggregationProcess.SetExternalFieldsFilled(record, true)
 	}
 	if fa.ipfixExporter != nil {
 		if err := fa.ipfixExporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
@@ -370,6 +398,11 @@ func (fa *flowAggregator) sendFlowKeyRecord(key ipfixintermediate.FlowKey, recor
 	}
 	if fa.clickHouseExporter != nil {
 		if err := fa.clickHouseExporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
+			return err
+		}
+	}
+	if fa.s3Exporter != nil {
+		if err := fa.s3Exporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
 			return err
 		}
 	}
@@ -522,7 +555,7 @@ func (fa *flowAggregator) watchConfiguration(stopCh <-chan struct{}) {
 }
 
 func (fa *flowAggregator) handleWatcherEvent() error {
-	data, err := ioutil.ReadFile(fa.configFile)
+	data, err := os.ReadFile(fa.configFile)
 	if err != nil {
 		return fmt.Errorf("cannot read FlowAggregator configuration file: %v", err)
 	}
@@ -532,7 +565,7 @@ func (fa *flowAggregator) handleWatcherEvent() error {
 		return nil
 	}
 	if bytes.Equal(data, fa.configData) {
-		klog.InfoS("Flow-aggregator configuration didn't changed")
+		klog.InfoS("Flow-aggregator configuration didn't change")
 		return nil
 	}
 	fa.configData = data
@@ -564,7 +597,7 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 		if fa.clickHouseExporter == nil {
 			klog.InfoS("Enabling ClickHouse")
 			var err error
-			fa.clickHouseExporter, err = newClickHouseExporter(opt)
+			fa.clickHouseExporter, err = newClickHouseExporter(fa.k8sClient, opt)
 			if err != nil {
 				klog.ErrorS(err, "Error when creating ClickHouse export process")
 				return
@@ -580,6 +613,28 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 			fa.clickHouseExporter.Stop()
 			fa.clickHouseExporter = nil
 			klog.InfoS("Disabled ClickHouse")
+		}
+	}
+	if opt.Config.S3Uploader.Enable {
+		if fa.s3Exporter == nil {
+			klog.InfoS("Enabling S3Uploader")
+			var err error
+			fa.s3Exporter, err = newS3Exporter(fa.k8sClient, opt)
+			if err != nil {
+				klog.ErrorS(err, "Error when creating S3 export process")
+				return
+			}
+			fa.s3Exporter.Start()
+			klog.InfoS("Enabled S3Uploader")
+		} else {
+			fa.s3Exporter.UpdateOptions(opt)
+		}
+	} else {
+		if fa.s3Exporter != nil {
+			klog.InfoS("Disabling S3Uploader")
+			fa.s3Exporter.Stop()
+			fa.s3Exporter = nil
+			klog.InfoS("Disabled S3Uploader")
 		}
 	}
 }

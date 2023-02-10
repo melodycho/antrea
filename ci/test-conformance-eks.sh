@@ -21,8 +21,8 @@ function echoerr {
 }
 
 CLUSTER=""
-REGION="us-east-2"
-K8S_VERSION="1.21"
+REGION="us-west-2"
+K8S_VERSION="1.24"
 AWS_NODE_TYPE="t3.medium"
 SSH_KEY_PATH="$HOME/.ssh/id_rsa.pub"
 SSH_PRIVATE_KEY_PATH="$HOME/.ssh/id_rsa"
@@ -34,24 +34,29 @@ MODE="report"
 TEST_SCRIPT_RC=0
 KUBE_CONFORMANCE_IMAGE_VERSION=auto
 INSTALL_EKSCTL=true
+AWS_SERVICE_USER_ROLE_ARN=""
+AWS_SERVICE_USER_NAME=""
 
 _usage="Usage: $0 [--cluster-name <EKSClusterNameToUse>] [--kubeconfig <KubeconfigSavePath>] [--k8s-version <ClusterVersion>]\
-                  [--aws-access-key <AccessKey>] [--aws-secret-key <SecretKey>] [--aws-region <Region>] [--ssh-key <SSHKey] \
-                  [--ssh-private-key <SSHPrivateKey] [--log-mode <SonobuoyResultLogLevel>] [--setup-only] [--cleanup-only]
+                  [--aws-access-key <AccessKey>] [--aws-secret-key <SecretKey>] [--aws-region <Region>] [--aws-service-user <ServiceUserName>]\
+                  [--aws-service-user-role-arn <ServiceUserRoleARN>] [--ssh-key <SSHKey] [--ssh-private-key <SSHPrivateKey] [--log-mode <SonobuoyResultLogLevel>]\
+                  [--setup-only] [--cleanup-only]
 
 Setup a EKS cluster to run K8s e2e community tests (Conformance & Network Policy).
 
-        --cluster-name           The cluster name to be used for the generated EKS cluster. Must be specified if not run in Jenkins environment.
-        --kubeconfig             Path to save kubeconfig of generated EKS cluster.
-        --k8s-version            GKE K8s cluster version. Defaults to 1.17.
-        --aws-access-key         AWS Acess Key for logging in to awscli.
-        --aws-secret-key         AWS Secret Key for logging in to awscli.
-        --aws-region             The AWS region where the cluster will be initiated. Defaults to us-east-2.
-        --ssh-key                The path of key to be used for ssh access to worker nodes.
-        --log-mode               Use the flag to set either 'report', 'detail', or 'dump' level data for sonobouy results.
-        --setup-only             Only perform setting up the cluster and run test.
-        --cleanup-only           Only perform cleaning up the cluster.
-        --skip-eksctl-install    Do not install the latest eksctl version. Eksctl must be installed already."
+        --cluster-name                The cluster name to be used for the generated EKS cluster. Must be specified if not run in Jenkins environment.
+        --kubeconfig                  Path to save kubeconfig of generated EKS cluster.
+        --k8s-version                 EKS K8s cluster version. Defaults to 1.24.
+        --aws-access-key              AWS Acess Key for logging in to awscli.
+        --aws-secret-key              AWS Secret Key for logging in to awscli.
+        --aws-service-user-role-arn   AWS Service User Role ARN for logging in to awscli.
+        --aws-service-user            AWS Service User Name for logging in to awscli.
+        --aws-region                  The AWS region where the cluster will be initiated. Defaults to us-east-2.
+        --ssh-key                     The path of key to be used for ssh access to worker nodes.
+        --log-mode                    Use the flag to set either 'report', 'detail', or 'dump' level data for sonobouy results.
+        --setup-only                  Only perform setting up the cluster and run test.
+        --cleanup-only                Only perform cleaning up the cluster.
+        --skip-eksctl-install         Do not install the latest eksctl version. Eksctl must be installed already."
 
 function print_usage {
     echoerr "$_usage"
@@ -76,6 +81,14 @@ case $key in
     ;;
     --aws-secret-key)
     AWS_SECRET_KEY="$2"
+    shift 2
+    ;;
+    --aws-service-user-role-arn)
+    AWS_SERVICE_USER_ROLE_ARN="$2"
+    shift 2
+    ;;
+    --aws-service-user)
+    AWS_SERVICE_USER_NAME="$2"
     shift 2
     ;;
     --aws-region)
@@ -173,12 +186,37 @@ function setup_eks() {
     aws --version
 
     set +e
-    aws configure << EOF
-${AWS_ACCESS_KEY}
-${AWS_SECRET_KEY}
-${REGION}
-JSON
+    if [[ "$AWS_SERVICE_USER_ROLE_ARN" != "" ]] && [[ "$AWS_SERVICE_USER_NAME" != "" ]]; then
+        mkdir -p ~/.aws
+        cat > ~/.aws/config <<EOF
+[default]
+region = $REGION
+role_arn = $AWS_SERVICE_USER_ROLE_ARN
+source_profile = $AWS_SERVICE_USER_NAME
+output = json
 EOF
+        cat > ~/.aws/credentials <<EOF
+[$AWS_SERVICE_USER_NAME]
+aws_access_key_id = $AWS_ACCESS_KEY
+aws_secret_access_key = $AWS_SECRET_KEY
+EOF
+    elif [[ "$AWS_SERVICE_USER_ROLE_ARN" = "" ]] && [[ "$AWS_SERVICE_USER_NAME" = "" ]]; then
+        mkdir -p ~/.aws
+        cat > ~/.aws/config <<EOF
+[default]
+region = $REGION
+output = json
+EOF
+        cat > ~/.aws/credentials <<EOF
+[default]
+aws_access_key_id = $AWS_ACCESS_KEY
+aws_secret_access_key = $AWS_SECRET_KEY
+EOF
+    else
+        echo "Invalid input either specify both aws-service-user-role-arn and aws-service-user or none."
+        exit 1
+    fi
+
     if [[ "$INSTALL_EKSCTL" == true ]]; then
         echo "=== Installing latest version of eksctl ==="
         curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
@@ -239,12 +277,12 @@ function deliver_antrea_to_eks() {
     echo "=== Loading the Antrea image to each Node ==="
     antrea_image="antrea-ubuntu"
     DOCKER_IMG_VERSION=${CLUSTER}
-    DOCKER_IMG_NAME="projects.registry.vmware.com/antrea/antrea-ubuntu"
+    DOCKER_IMG_NAME="antrea/antrea-ubuntu"
     docker save -o ${antrea_image}.tar ${DOCKER_IMG_NAME}:${DOCKER_IMG_VERSION}
 
     kubectl get nodes -o wide --no-headers=true | awk '{print $7}' | while read IP; do
         scp -o StrictHostKeyChecking=no -i ${SSH_PRIVATE_KEY_PATH} ${antrea_image}.tar ec2-user@${IP}:~
-        ssh -o StrictHostKeyChecking=no -i ${SSH_PRIVATE_KEY_PATH} -n ec2-user@${IP} "sudo ctr -n=k8s.io images import ~/${antrea_image}.tar ; sudo ctr -n=k8s.io images tag ${DOCKER_IMG_NAME}:${DOCKER_IMG_VERSION} ${DOCKER_IMG_NAME}:latest --force"
+        ssh -o StrictHostKeyChecking=no -i ${SSH_PRIVATE_KEY_PATH} -n ec2-user@${IP} "sudo ctr -n=k8s.io images import ~/${antrea_image}.tar ; sudo ctr -n=k8s.io images tag docker.io/${DOCKER_IMG_NAME}:${DOCKER_IMG_VERSION} docker.io/${DOCKER_IMG_NAME}:latest --force"
     done
     rm ${antrea_image}.tar
 

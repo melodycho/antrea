@@ -15,31 +15,20 @@
 package multicluster
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"antrea.io/antrea/pkg/antctl/raw"
 	"antrea.io/antrea/pkg/antctl/raw/multicluster/common"
 )
 
-const (
-	defaultToken = "default-member-token"
-
-	// We comment out these ClusterSetJoinConfig fields in the generated
-	// join config file, so they can be populated by command line options of
-	// the "antctl mc join" command.
-	optionalFields = `#clusterID: ""
-#namespace: ""
-# Use the pre-created token Secret.
-#tokenSecretName: ""
-# Create a token Secret with the manifest file.
-#toeknSecretFile: ""
-`
-)
+const defaultToken = "default-member-token"
 
 type initOptions struct {
 	namespace   string
@@ -47,30 +36,38 @@ type initOptions struct {
 	clusterID   string
 	createToken bool
 	output      string
+	k8sClient   client.Client
 }
 
 var initOpts *initOptions
 
-func (o *initOptions) validate() error {
+func (o *initOptions) validate(cmd *cobra.Command) error {
 	if o.namespace == "" {
-		return fmt.Errorf("Namespace is required")
+		return fmt.Errorf("Namespace must be specified")
 	}
 	if o.clusterSet == "" {
-		return fmt.Errorf("ClusterSet is required")
+		return fmt.Errorf("ClusterSet must be provided")
 	}
 	if o.clusterID == "" {
-		return fmt.Errorf("ClusterID is required")
+		return fmt.Errorf("ClusterID must be provided")
+	}
+	var err error
+	if o.k8sClient == nil {
+		o.k8sClient, err = common.NewClient(cmd)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 var initExample = strings.Trim(`
 # Initialize ClusterSet in the given Namespace of the leader cluster.
-  $ antctl mc init --namespace antrea-multicluster --clusterset clusterset1 --clusterid cluster-north
-# Initialize ClusterSet of the leader cluster and save the member cluster join config to a file.
-  $ antctl mc init --namespace antrea-multicluster --clusterset clusterset1 --clusterid cluster-north -o join-config.yml
+  $ antctl mc init --clusterset clusterset1 --clusterid cluster-north -n antrea-multicluster
+# Initialize ClusterSet of the leader cluster and save the join config to a file.
+  $ antctl mc init --clusterset clusterset1 --clusterid cluster-north -n antrea-multicluster -j join-config.yml
 # Initialize ClusterSet with a default member token, and save the join config as well as the token Secret to a file.
-  $ antctl mc init --namespace antrea-multicluster --clusterset clusterset1 --clusterid cluster-north --create-token -o join-config.yml 
+  $ antctl mc init --clusterset clusterset1 --clusterid cluster-north --create-token -n antrea-multicluster -j join-config.yml
 `, "\n")
 
 func NewInitCommand() *cobra.Command {
@@ -89,95 +86,66 @@ func NewInitCommand() *cobra.Command {
 	command.Flags().StringVarP(&o.clusterID, "clusterid", "", "", "ClusterID of the leader cluster")
 	command.Flags().BoolVarP(&o.createToken, "create-token", "", false, "If specified, a default member token will be created. "+
 		"If the output file is also specified, the token Secret manifest will be saved to the file after the join config.")
-	command.Flags().StringVarP(&o.output, "output-file", "o", "", "Output file to save the member cluster join config")
+	command.Flags().StringVarP(&o.output, "join-config-file", "j", "", "File to save the config parameters for member clusters to join the ClusterSet")
 
 	return command
 }
 
 func initRunE(cmd *cobra.Command, args []string) error {
-	if err := initOpts.validate(); err != nil {
-		return err
-	}
-	k8sClient, err := common.NewClient(cmd)
-	if err != nil {
+	if err := initOpts.validate(cmd); err != nil {
 		return err
 	}
 	createdRes := []map[string]interface{}{}
 	var createErr error
 	defer func() {
 		if createErr != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "Failed to init the Antrea Multi-cluster. Deleting the created resources\n")
-			if err := common.Rollback(cmd, k8sClient, createdRes); err != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "Failed to rollback: %v\n", err)
-			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Failed to initialize the ClusterSet. Deleting the created resources\n")
+			common.Rollback(cmd, initOpts.k8sClient, createdRes)
 		}
 	}()
-	createErr = common.CreateClusterClaim(cmd, k8sClient, initOpts.namespace, initOpts.clusterSet, initOpts.clusterID, &createdRes)
+	createErr = common.CreateClusterClaim(cmd, initOpts.k8sClient, initOpts.namespace, initOpts.clusterSet, initOpts.clusterID, &createdRes)
 	if createErr != nil {
 		return createErr
 	}
-	createErr = common.CreateClusterSet(cmd, k8sClient, initOpts.namespace, initOpts.clusterSet, "", "", "", initOpts.clusterID, initOpts.namespace, &createdRes)
+	createErr = common.CreateClusterSet(cmd, initOpts.k8sClient, initOpts.namespace, initOpts.clusterSet, "", "", "", initOpts.clusterID, initOpts.namespace, &createdRes)
 	if createErr != nil {
 		return createErr
 	}
 
+	// Declare ClusterSet init succeeded, even if there is a failure later when creating the
+	// member token or writing the join config file.
+	fmt.Fprintf(cmd.OutOrStdout(), "Successfully initialized ClusterSet %s\n", initOpts.clusterSet)
+	fmt.Fprintf(cmd.OutOrStdout(), "You can run command \"antctl mc get joinconfig -n %s\" to print the parameters needed for a member cluster to join the ClusterSet.\n", initOpts.namespace)
+
+	var tokenSecret *corev1.Secret
+	if initOpts.createToken {
+		if err := common.CreateMemberToken(cmd, initOpts.k8sClient, defaultToken, initOpts.namespace, &createdRes); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to create member token. You may run command \"antctl mc create membertoken\" to create a token.\n")
+			return err
+		}
+
+		tokenSecret = &corev1.Secret{}
+		if err := initOpts.k8sClient.Get(context.TODO(), types.NamespacedName{
+			Namespace: initOpts.namespace,
+			Name:      defaultToken,
+		}, tokenSecret); err != nil {
+			return err
+		}
+	}
+
+	var err error
 	var file *os.File
 	if initOpts.output != "" {
 		if file, err = os.OpenFile(initOpts.output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_APPEND, 0644); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "Failed to open file %s: %v\n", initOpts.output, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error opening file %s: %v\n", initOpts.output, err)
+			return err
 		}
-	}
-	defer file.Close()
-
-	if err := outputConfig(cmd, file); err != nil {
-		return err
-	}
-	if initOpts.createToken {
-		if createErr = common.CreateMemberToken(cmd, k8sClient, defaultToken, initOpts.namespace, file, &createdRes); createErr != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "Failed to create Secret: %v\n", createErr)
-			return createErr
+		defer file.Close()
+		if err := common.OutputJoinConfig(cmd, file, initOpts.clusterSet, initOpts.clusterID, initOpts.namespace, tokenSecret); err != nil {
+			return err
 		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Saved ClusterSet join parameters to file: %s\n", initOpts.output)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Successfully initialized ClusterSet %s\n", initOpts.clusterSet)
-
-	return nil
-}
-
-func outputConfig(cmd *cobra.Command, file *os.File) error {
-	if file == nil {
-		return nil
-	}
-	kubeconfig, err := raw.ResolveKubeconfig(cmd)
-	if err != nil {
-		return err
-	}
-
-	config := &ClusterSetJoinConfig{
-		APIVersion:      common.ClusterSetJoinConfigAPIVersion,
-		Kind:            common.ClusterSetJoinConfigKind,
-		Namespace:       "",
-		ClusterID:       "",
-		LeaderClusterID: initOpts.clusterID,
-		LeaderAPIServer: kubeconfig.Host,
-		LeaderNamespace: initOpts.namespace,
-		ClusterSetID:    initOpts.clusterSet,
-	}
-
-	b, err := yaml.Marshal(config)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write([]byte("---\n")); err != nil {
-		return err
-	}
-	if _, err := file.Write(b); err != nil {
-		return err
-	}
-	if _, err := file.Write([]byte(optionalFields)); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Successfully output the join config to %s\n", initOpts.output)
 	return nil
 }

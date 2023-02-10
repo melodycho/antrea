@@ -16,14 +16,15 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/util/sets"
+	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/featuregate"
 	"k8s.io/klog/v2"
 
@@ -44,7 +45,7 @@ const (
 	defaultHostProcPathPrefix      = "/host"
 	defaultServiceCIDR             = "10.96.0.0/12"
 	defaultTunnelType              = ovsconfig.GeneveTunnel
-	defaultFlowCollectorAddress    = "flow-aggregator.flow-aggregator.svc:4739:tls"
+	defaultFlowCollectorAddress    = "flow-aggregator/flow-aggregator:4739:tls"
 	defaultFlowCollectorTransport  = "tls"
 	defaultFlowCollectorPort       = "4739"
 	defaultFlowPollInterval        = 5 * time.Second
@@ -54,6 +55,7 @@ const (
 	defaultStaleConnectionTimeout  = 5 * time.Minute
 	defaultNPLPortRange            = "61000-62000"
 	defaultNodeType                = config.K8sNode
+	defaultMaxEgressIPsPerNode     = 255
 )
 
 type Options struct {
@@ -61,6 +63,8 @@ type Options struct {
 	configFile string
 	// The configuration object
 	config *agentconfig.AgentConfig
+	// tlsCipherSuites is a slice of TLSCipherSuites mapped to input provided by user.
+	tlsCipherSuites []string
 	// IPFIX flow collector address
 	flowCollectorAddr string
 	// IPFIX flow collector protocol
@@ -117,11 +121,12 @@ func (o *Options) validate(args []string) error {
 		return fmt.Errorf("no positional arguments are supported")
 	}
 
-	if o.config.OVSDatapathType != string(ovsconfig.OVSDatapathSystem) && o.config.OVSDatapathType != string(ovsconfig.OVSDatapathNetdev) {
+	if o.config.OVSDatapathType != string(ovsconfig.OVSDatapathSystem) {
 		return fmt.Errorf("OVS datapath type %s is not supported", o.config.OVSDatapathType)
 	}
-	if o.config.OVSDatapathType == string(ovsconfig.OVSDatapathNetdev) {
-		klog.Info("OVS 'netdev' datapath is not fully supported at the moment")
+
+	if err := o.validateTLSOptions(); err != nil {
+		return err
 	}
 
 	if config.ExternalNode.String() == o.config.NodeType && !features.DefaultFeatureGate.Enabled(features.ExternalNode) {
@@ -140,7 +145,7 @@ func (o *Options) validate(args []string) error {
 }
 
 func (o *Options) loadConfigFromFile() error {
-	data, err := ioutil.ReadFile(o.configFile)
+	data, err := os.ReadFile(o.configFile)
 	if err != nil {
 		return err
 	}
@@ -169,6 +174,23 @@ func (o *Options) setDefaults() {
 	} else {
 		o.setExternalNodeDefaultOptions()
 	}
+}
+
+func (o *Options) validateTLSOptions() error {
+	_, err := cliflag.TLSVersion(o.config.TLSMinVersion)
+	if err != nil {
+		return fmt.Errorf("invalid TLSMinVersion: %v", err)
+	}
+	trimmedTLSCipherSuites := strings.ReplaceAll(o.config.TLSCipherSuites, " ", "")
+	if trimmedTLSCipherSuites != "" {
+		tlsCipherSuites := strings.Split(trimmedTLSCipherSuites, ",")
+		_, err = cliflag.TLSCipherSuites(tlsCipherSuites)
+		if err != nil {
+			return fmt.Errorf("invalid TLSCipherSuites: %v", err)
+		}
+		o.tlsCipherSuites = tlsCipherSuites
+	}
+	return nil
 }
 
 func (o *Options) validateAntreaProxyConfig() error {
@@ -273,11 +295,6 @@ func (o *Options) validateAntreaIPAMConfig() error {
 	if !features.DefaultFeatureGate.Enabled(features.AntreaIPAM) {
 		return fmt.Errorf("AntreaIPAM feature gate must be enabled to configure bridging mode")
 	}
-	// Bridging mode will connect uplink to OVS bridge, which is not compatible with OVSDatapathSystem 'netdev'.
-	if o.config.OVSDatapathType != string(ovsconfig.OVSDatapathSystem) {
-		return fmt.Errorf("Bridging mode requires 'system' OVSDatapathType, current: %s",
-			o.config.OVSDatapathType)
-	}
 	if !strings.EqualFold(o.config.TrafficEncapMode, config.TrafficEncapModeNoEncap.String()) {
 		return fmt.Errorf("Bridging mode requires 'noEncap' TrafficEncapMode, current: %s",
 			o.config.TrafficEncapMode)
@@ -286,6 +303,27 @@ func (o *Options) validateAntreaIPAMConfig() error {
 	// SNAT needs to be updated to bypass traffic from AntreaIPAM Pod to Per-Node IPAM Pod
 	if !o.config.NoSNAT {
 		return fmt.Errorf("Bridging mode requires noSNAT")
+	}
+	return nil
+}
+
+func (o *Options) validateMulticlusterConfig(encapMode config.TrafficEncapModeType) error {
+	if !o.config.Multicluster.EnableGateway && !o.config.Multicluster.EnableStretchedNetworkPolicy {
+		return nil
+	}
+
+	if !features.DefaultFeatureGate.Enabled(features.Multicluster) {
+		klog.InfoS("Multicluster feature gate is disabled. Multi-cluster options are ignored")
+		return nil
+	}
+
+	if !o.config.Multicluster.EnableGateway && o.config.Multicluster.EnableStretchedNetworkPolicy {
+		return fmt.Errorf("Multi-cluster Gateway must be enabled to enable StretchedNetworkPolicy")
+	}
+
+	if encapMode != config.TrafficEncapModeEncap {
+		// Only Encap mode is supported for Multi-cluster Gateway.
+		return fmt.Errorf("Multicluster is only applicable to the %s mode", config.TrafficEncapModeEncap)
 	}
 	return nil
 }
@@ -365,6 +403,19 @@ func (o *Options) setK8sNodeDefaultOptions() {
 			o.igmpQueryInterval = defaultIGMPQueryInterval
 		}
 	}
+
+	if features.DefaultFeatureGate.Enabled(features.Multicluster) && o.config.Multicluster.Enable {
+		// Multicluster.Enable is deprecated but it may be set by an earlier version
+		// deployment manifest. If it is set to true, pass the value to
+		// Multicluster.EnableGateway.
+		o.config.Multicluster.EnableGateway = true
+	}
+
+	if features.DefaultFeatureGate.Enabled(features.Egress) {
+		if o.config.Egress.MaxEgressIPsPerNode == 0 {
+			o.config.Egress.MaxEgressIPsPerNode = defaultMaxEgressIPsPerNode
+		}
+	}
 }
 
 func (o *Options) validateK8sNodeOptions() error {
@@ -437,11 +488,10 @@ func (o *Options) validateK8sNodeOptions() error {
 			}
 		}
 	}
-	if (features.DefaultFeatureGate.Enabled(features.Multicluster) || o.config.Multicluster.Enable) &&
-		encapMode != config.TrafficEncapModeEncap {
-		// Only Encap mode is supported for Multi-cluster feature.
-		return fmt.Errorf("Multicluster is only applicable to the %s mode", config.TrafficEncapModeEncap)
+	if err := o.validateMulticlusterConfig(encapMode); err != nil {
+		return err
 	}
+
 	if features.DefaultFeatureGate.Enabled(features.NodePortLocal) {
 		startPort, endPort, err := parsePortRange(o.config.NodePortLocal.PortRange)
 		if err != nil {
@@ -463,6 +513,12 @@ func (o *Options) validateK8sNodeOptions() error {
 			return fmt.Errorf("dnsServerOverride %s is invalid: %v", o.config.DNSServerOverride, err)
 		}
 		o.dnsServerOverride = hostPort
+	}
+
+	if features.DefaultFeatureGate.Enabled(features.Egress) {
+		if o.config.Egress.MaxEgressIPsPerNode > defaultMaxEgressIPsPerNode {
+			return fmt.Errorf("maxEgressIPsPerNode cannot be greater than %d", defaultMaxEgressIPsPerNode)
+		}
 	}
 	return nil
 }

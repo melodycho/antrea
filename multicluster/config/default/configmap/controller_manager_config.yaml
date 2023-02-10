@@ -9,4 +9,8 @@ webhook:
 leaderElection:
   leaderElect: false
 serviceCIDR: ""
+podCIDRs:
+  - ""
 gatewayIPPrecedence: "private"
+endpointIPType: "ClusterIP"
+enableStretchedNetworkPolicy: false

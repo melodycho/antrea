@@ -31,8 +31,6 @@ const (
 	TunnelInterface
 	// UplinkInterface is used to mark current interface is for uplink port
 	UplinkInterface
-	// HostInterface is used to mark current interface is for host
-	HostInterface
 	// TrafficControlInterface is used to mark current interface is for traffic control port
 	TrafficControlInterface
 	// ExternalEntityInterface is used to mark current interface is for ExternalEntity Endpoint
@@ -148,33 +146,29 @@ func NewContainerInterface(
 }
 
 // NewGatewayInterface creates InterfaceConfig for the host gateway interface.
-func NewGatewayInterface(gatewayName string) *InterfaceConfig {
-	gatewayConfig := &InterfaceConfig{InterfaceName: gatewayName, Type: GatewayInterface}
+func NewGatewayInterface(gatewayName string, gatewayMAC net.HardwareAddr) *InterfaceConfig {
+	gatewayConfig := &InterfaceConfig{InterfaceName: gatewayName, Type: GatewayInterface, MAC: gatewayMAC}
 	return gatewayConfig
 }
 
 // NewTunnelInterface creates InterfaceConfig for the default tunnel port
 // interface.
-func NewTunnelInterface(tunnelName string, tunnelType ovsconfig.TunnelType, destinationPort int32, localIP net.IP, csum bool) *InterfaceConfig {
+func NewTunnelInterface(tunnelName string, tunnelType ovsconfig.TunnelType, destinationPort int32, localIP net.IP, csum bool, ovsPortConfig *OVSPortConfig) *InterfaceConfig {
 	tunnelConfig := &TunnelInterfaceConfig{Type: tunnelType, DestinationPort: destinationPort, LocalIP: localIP, Csum: csum}
-	return &InterfaceConfig{InterfaceName: tunnelName, Type: TunnelInterface, TunnelInterfaceConfig: tunnelConfig}
+	return &InterfaceConfig{InterfaceName: tunnelName, Type: TunnelInterface, TunnelInterfaceConfig: tunnelConfig, OVSPortConfig: ovsPortConfig}
 }
 
 // NewIPSecTunnelInterface creates InterfaceConfig for the IPsec tunnel to the
 // Node.
-func NewIPSecTunnelInterface(interfaceName string, tunnelType ovsconfig.TunnelType, nodeName string, nodeIP net.IP, psk, remoteName string) *InterfaceConfig {
+func NewIPSecTunnelInterface(interfaceName string, tunnelType ovsconfig.TunnelType, nodeName string, nodeIP net.IP, psk, remoteName string, ovsPortConfig *OVSPortConfig) *InterfaceConfig {
 	tunnelConfig := &TunnelInterfaceConfig{Type: tunnelType, NodeName: nodeName, RemoteIP: nodeIP, PSK: psk, RemoteName: remoteName}
-	return &InterfaceConfig{InterfaceName: interfaceName, Type: TunnelInterface, TunnelInterfaceConfig: tunnelConfig}
+	return &InterfaceConfig{InterfaceName: interfaceName, Type: TunnelInterface, TunnelInterfaceConfig: tunnelConfig, OVSPortConfig: ovsPortConfig}
 }
 
 // NewUplinkInterface creates InterfaceConfig for the uplink interface.
 func NewUplinkInterface(uplinkName string) *InterfaceConfig {
 	uplinkConfig := &InterfaceConfig{InterfaceName: uplinkName, Type: UplinkInterface}
 	return uplinkConfig
-}
-
-func NewHostInterface(hostInterfaceName string) *InterfaceConfig {
-	return &InterfaceConfig{InterfaceName: hostInterfaceName, Type: HostInterface}
 }
 
 func NewTrafficControlInterface(interfaceName string) *InterfaceConfig {

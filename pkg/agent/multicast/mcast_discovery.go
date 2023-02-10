@@ -76,9 +76,12 @@ func (s *IGMPSnooper) HandlePacketIn(pktIn *ofctrl.PacketIn) error {
 	matchers := pktIn.GetMatches()
 	// Get custom reasons in this packet-in.
 	match := openflow.GetMatchFieldByRegID(matchers, openflow.CustomReasonField.GetRegID())
+	if match == nil {
+		return fmt.Errorf("error getting match from IGMP marks in CustomField")
+	}
 	customReasons, err := getInfoInReg(match, openflow.CustomReasonField.GetRange().ToNXRange())
 	if err != nil {
-		klog.ErrorS(err, "Received error while unloading customReason from OVS reg", "regField", openflow.CustomReasonField.GetName())
+		klog.ErrorS(err, "Received error while unloading customReason from OVS reg")
 		return err
 	}
 	if customReasons&openflow.CustomReasonIGMP == openflow.CustomReasonIGMP {
@@ -399,7 +402,7 @@ func parseIGMPPacket(pkt protocol.Ethernet) (protocol.IGMPMessage, error) {
 		}
 		return igmp, nil
 	default:
-		return nil, errors.New("unknown igmp packet")
+		return nil, errors.New("unknown IGMP packet")
 	}
 }
 

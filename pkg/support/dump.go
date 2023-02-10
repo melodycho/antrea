@@ -32,7 +32,6 @@ import (
 
 	agentquerier "antrea.io/antrea/pkg/agent/querier"
 	clusterinformationv1beta1 "antrea.io/antrea/pkg/apis/crd/v1beta1"
-	controllerquerier "antrea.io/antrea/pkg/controller/querier"
 	"antrea.io/antrea/pkg/ovs/ovsctl"
 	"antrea.io/antrea/pkg/querier"
 	"antrea.io/antrea/pkg/util/logdir"
@@ -175,13 +174,13 @@ func directoryCopy(fs afero.Fs, targetDir string, srcDir string, prefixFilter st
 		targetPath := path.Join(targetDir, info.Name())
 		targetFile, err := fs.Create(targetPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("error when creating target file %s: %w", targetPath, err)
 		}
 		defer targetFile.Close()
 
 		srcFile, err := fs.Open(filePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("error when opening source file %s: %w", filePath, err)
 		}
 		defer srcFile.Close()
 
@@ -245,7 +244,6 @@ func writeYAMLFile(fs afero.Fs, filePath string, resource string, data interface
 type controllerDumper struct {
 	fs       afero.Fs
 	executor exec.Interface
-	cq       controllerquerier.ControllerQuerier
 	since    string
 }
 

@@ -322,12 +322,16 @@ data:
     leaderElection:
       leaderElect: false
     serviceCIDR: ""
+    podCIDRs:
+      - ""
     gatewayIPPrecedence: "private"
+    endpointIPType: "ClusterIP"
+    enableStretchedNetworkPolicy: false
 kind: ConfigMap
 metadata:
   labels:
     app: antrea
-  name: antrea-mc-controller-config-6b7ccgh6k9
+  name: antrea-mc-controller-config
   namespace: antrea-multicluster
 ---
 apiVersion: v1
@@ -361,6 +365,8 @@ spec:
       component: antrea-mc-controller
   template:
     metadata:
+      annotations:
+        checksum/config: 7eb0f1e65f7eb3e35b0739d6064b92b7621af0f4e41813c35bfdee71ceaefbe2
       labels:
         app: antrea
         component: antrea-mc-controller
@@ -376,7 +382,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: projects.registry.vmware.com/antrea/antrea-mc-controller:latest
+        image: antrea/antrea-mc-controller:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -409,7 +415,7 @@ spec:
       terminationGracePeriodSeconds: 10
       volumes:
       - configMap:
-          name: antrea-mc-controller-config-6b7ccgh6k9
+          name: antrea-mc-controller-config
         name: antrea-mc-controller-config
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -448,7 +454,6 @@ webhooks:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  creationTimestamp: null
   labels:
     app: antrea
   name: antrea-multicluster-antrea-mc-validating-webhook-configuration

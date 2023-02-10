@@ -25,22 +25,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	k8smcsv1alpha1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
+	"antrea.io/antrea/multicluster/apis/multicluster/constants"
 	mcsv1alpha1 "antrea.io/antrea/multicluster/apis/multicluster/v1alpha1"
 	"antrea.io/antrea/multicluster/controllers/multicluster/common"
 	"antrea.io/antrea/multicluster/controllers/multicluster/commonarea"
+	"antrea.io/antrea/multicluster/controllers/multicluster/member"
 	"antrea.io/antrea/pkg/apis/crd/v1alpha1"
 )
 
 func TestStaleController_CleanupService(t *testing.T) {
-	mcSvcNginx := svcNginx.DeepCopy()
+	mcSvcNginx := common.SvcNginx.DeepCopy()
 	mcSvcNginx.Name = "antrea-mc-nginx"
 	mcSvcNginx.Annotations = map[string]string{common.AntreaMCServiceAnnotation: "true"}
-	mcSvcNonNginx := svcNginx.DeepCopy()
+	mcSvcNonNginx := common.SvcNginx.DeepCopy()
 	mcSvcNginx.Name = "antrea-mc-non-nginx"
 	mcSvcNonNginx.Annotations = map[string]string{common.AntreaMCServiceAnnotation: "true"}
 	mcSvcImpNginx := k8smcsv1alpha1.ServiceImport{
@@ -63,7 +64,7 @@ func TestStaleController_CleanupService(t *testing.T) {
 		Spec: mcsv1alpha1.ResourceImportSpec{
 			Name:      "non-nginx",
 			Namespace: "default",
-			Kind:      common.ServiceImportKind,
+			Kind:      constants.ServiceImportKind,
 		},
 	}
 	tests := []struct {
@@ -92,12 +93,12 @@ func TestStaleController_CleanupService(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existSvcList, tt.existSvcImpList).Build()
-			fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existingResImpList).Build()
-			commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default")
-			mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default")
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existSvcList, tt.existSvcImpList).Build()
+			fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existingResImpList).Build()
+			commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "default", nil)
+			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false)
 			mcReconciler.SetRemoteCommonArea(commonArea)
-			c := NewStaleResCleanupController(fakeClient, scheme, "default", mcReconciler, MemberCluster)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, MemberCluster)
 			if err := c.cleanup(); err != nil {
 				t.Errorf("StaleController.cleanup() should clean up all stale Service and ServiceImport but got err = %v", err)
 			}
@@ -128,7 +129,7 @@ func TestStaleController_CleanupService(t *testing.T) {
 
 func TestStaleController_CleanupACNP(t *testing.T) {
 	acnpImportName := "acnp-for-isolation"
-	acnpResImportName := leaderNamespace + "-" + acnpImportName
+	acnpResImportName := common.LeaderNamespace + "-" + acnpImportName
 	acnpResImport := mcsv1alpha1.ResourceImport{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
@@ -136,11 +137,11 @@ func TestStaleController_CleanupACNP(t *testing.T) {
 		},
 		Spec: mcsv1alpha1.ResourceImportSpec{
 			Name: acnpImportName,
-			Kind: common.AntreaClusterNetworkPolicyKind,
+			Kind: constants.AntreaClusterNetworkPolicyKind,
 			ClusterNetworkPolicy: &v1alpha1.ClusterNetworkPolicySpec{
 				Tier:     "securityops",
 				Priority: 1.0,
-				AppliedTo: []v1alpha1.NetworkPolicyPeer{
+				AppliedTo: []v1alpha1.AppliedTo{
 					{NamespaceSelector: &metav1.LabelSelector{}},
 				},
 			},
@@ -186,13 +187,13 @@ func TestStaleController_CleanupACNP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existingACNPList).Build()
-			fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existingResImpList).Build()
-			commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default")
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existingACNPList).Build()
+			fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existingResImpList).Build()
+			commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "default", nil)
 
-			mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default")
+			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false)
 			mcReconciler.SetRemoteCommonArea(commonArea)
-			c := NewStaleResCleanupController(fakeClient, scheme, "default", mcReconciler, MemberCluster)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, MemberCluster)
 			if err := c.cleanup(); err != nil {
 				t.Errorf("StaleController.cleanup() should clean up all stale ACNPs but got err = %v", err)
 			}
@@ -224,13 +225,13 @@ func TestStaleController_CleanupResourceExport(t *testing.T) {
 			Namespace: "default",
 			Name:      "cluster-a-default-nginx-service",
 			Labels: map[string]string{
-				common.SourceClusterID: "cluster-a",
+				constants.SourceClusterID: "cluster-a",
 			},
 		},
 		Spec: mcsv1alpha1.ResourceExportSpec{
 			Name:      "nginx",
 			Namespace: "default",
-			Kind:      common.ServiceKind,
+			Kind:      constants.ServiceKind,
 		},
 	}
 	toDeleteEPResExport := mcsv1alpha1.ResourceExport{
@@ -238,13 +239,13 @@ func TestStaleController_CleanupResourceExport(t *testing.T) {
 			Namespace: "default",
 			Name:      "cluster-a-default-nginx-endpoint",
 			Labels: map[string]string{
-				common.SourceClusterID: "cluster-a",
+				constants.SourceClusterID: "cluster-a",
 			},
 		},
 		Spec: mcsv1alpha1.ResourceExportSpec{
 			Name:      "nginx",
 			Namespace: "default",
-			Kind:      common.EndpointsKind,
+			Kind:      constants.EndpointsKind,
 		},
 	}
 	toDeleteCIResExport := mcsv1alpha1.ResourceExport{
@@ -256,7 +257,7 @@ func TestStaleController_CleanupResourceExport(t *testing.T) {
 			Name:      "tobedeleted",
 			Namespace: "default",
 			ClusterID: "cluster-a",
-			Kind:      common.ClusterInfoKind,
+			Kind:      constants.ClusterInfoKind,
 		},
 	}
 	toKeepSvcResExport := mcsv1alpha1.ResourceExport{
@@ -264,39 +265,103 @@ func TestStaleController_CleanupResourceExport(t *testing.T) {
 			Namespace: "default",
 			Name:      "cluster-a-default-keep-nginx-service",
 			Labels: map[string]string{
-				common.SourceClusterID: "cluster-a",
+				constants.SourceClusterID: "cluster-a",
 			},
 		},
 		Spec: mcsv1alpha1.ResourceExportSpec{
 			Name:      "keep-nginx",
 			Namespace: "default",
-			Kind:      common.ServiceKind,
+			Kind:      constants.ServiceKind,
 		},
 	}
 
-	svcResExportFromOther := mcsv1alpha1.ResourceExport{
+	svcResExportFromOtherCluster := mcsv1alpha1.ResourceExport{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      "cluster-b-default-nginx-service",
 			Labels: map[string]string{
-				common.SourceClusterID: "cluster-b",
+				constants.SourceClusterID: "cluster-b",
 			},
 		},
 		Spec: mcsv1alpha1.ResourceExportSpec{
 			Name:      "nginx",
 			Namespace: "default",
-			Kind:      common.ServiceKind,
+			Kind:      constants.ServiceKind,
+		},
+	}
+	existingNamespaces := &corev1.NamespaceList{
+		Items: []corev1.Namespace{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-ns",
+					Labels: map[string]string{
+						"purpose": "test",
+					},
+				},
+			},
+		},
+	}
+	existingPods := &corev1.PodList{
+		Items: []corev1.Pod{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "test-ns",
+					Name:      "test-pod",
+					Labels: map[string]string{
+						"app": "web",
+					},
+				},
+			},
+		},
+	}
+	labelNormalizedExist := "ns:kubernetes.io/metadata.name=test-ns,purpose=test&pod:app=web"
+	labelNormalizedNonExist := "ns:kubernetes.io/metadata.name=test-ns,purpose=test&pod:app=db"
+	toKeepLabelResExport := mcsv1alpha1.ResourceExport{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "cluster-a-" + common.HashLabelIdentity(labelNormalizedExist),
+			Labels: map[string]string{
+				constants.SourceKind:      constants.LabelIdentityKind,
+				constants.SourceClusterID: "cluster-a",
+			},
+		},
+		Spec: mcsv1alpha1.ResourceExportSpec{
+			Kind: constants.LabelIdentityKind,
+			LabelIdentity: &mcsv1alpha1.LabelIdentityExport{
+				NormalizedLabel: labelNormalizedExist,
+			},
+		},
+	}
+	toDeleteLabelResExport := mcsv1alpha1.ResourceExport{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "cluster-a-" + common.HashLabelIdentity(labelNormalizedNonExist),
+			Labels: map[string]string{
+				constants.SourceKind:      constants.LabelIdentityKind,
+				constants.SourceClusterID: "cluster-a",
+			},
+		},
+		Spec: mcsv1alpha1.ResourceExportSpec{
+			Kind: constants.LabelIdentityKind,
+			LabelIdentity: &mcsv1alpha1.LabelIdentityExport{
+				NormalizedLabel: labelNormalizedNonExist,
+			},
 		},
 	}
 	tests := []struct {
-		name            string
-		existSvcList    *corev1.ServiceList
-		existSvcExpList *k8smcsv1alpha1.ServiceExportList
-		existResExpList *mcsv1alpha1.ResourceExportList
-		wantErr         bool
+		name                   string
+		existSvcList           *corev1.ServiceList
+		existPodList           *corev1.PodList
+		existNamespaceList     *corev1.NamespaceList
+		existLabelIdentityList *mcsv1alpha1.LabelIdentityList
+		existSvcExpList        *k8smcsv1alpha1.ServiceExportList
+		existResExpList        *mcsv1alpha1.ResourceExportList
+		wantErr                bool
 	}{
 		{
-			name: "clean up ResourceExport successfully",
+			name:               "clean up ResourceExport successfully",
+			existNamespaceList: existingNamespaces,
+			existPodList:       existingPods,
 			existSvcExpList: &k8smcsv1alpha1.ServiceExportList{
 				Items: []k8smcsv1alpha1.ServiceExport{
 					svcExpNginx,
@@ -308,33 +373,31 @@ func TestStaleController_CleanupResourceExport(t *testing.T) {
 					toDeleteEPResExport,
 					toDeleteCIResExport,
 					toKeepSvcResExport,
-					svcResExportFromOther,
+					toKeepLabelResExport,
+					toDeleteLabelResExport,
+					svcResExportFromOtherCluster,
 				},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existSvcExpList).Build()
-			fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existResExpList).Build()
-			commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "default")
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existSvcExpList, tt.existPodList, tt.existNamespaceList).Build()
+			fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existResExpList).Build()
+			commonArea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "default", nil)
 
-			mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default")
+			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false)
 			mcReconciler.SetRemoteCommonArea(commonArea)
-			c := NewStaleResCleanupController(fakeClient, scheme, "default", mcReconciler, MemberCluster)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, MemberCluster)
 			if err := c.cleanup(); err != nil {
 				t.Errorf("StaleController.cleanup() should clean up all stale ResourceExports but got err = %v", err)
 			}
-			ctx := context.TODO()
-			svcResExpList := &mcsv1alpha1.ResourceExportList{}
-			err := fakeRemoteClient.List(ctx, svcResExpList, &client.ListOptions{})
-			resExpLen := len(svcResExpList.Items)
+			resExpList := &mcsv1alpha1.ResourceExportList{}
+			err := fakeRemoteClient.List(context.TODO(), resExpList, &client.ListOptions{})
+			resExpLen := len(resExpList.Items)
 			if err == nil {
-				if resExpLen != 2 {
-					for _, re := range svcResExpList.Items {
-						klog.Infof("left resourceexport %v", re)
-					}
-					t.Errorf("Should only two valid ResourceExports left but got %v", resExpLen)
+				if resExpLen != 3 {
+					t.Errorf("Should only THREE valid ResourceExports left but got %v", resExpLen)
 				}
 			} else {
 				t.Errorf("Should list ResourceExport successfully but got err = %v", err)
@@ -354,7 +417,7 @@ func TestStaleController_CleanupClusterInfoImport(t *testing.T) {
 			Name:      "cluster-a-default-clusterinfo",
 		},
 		Spec: mcsv1alpha1.ResourceImportSpec{
-			Kind:        common.ClusterInfoKind,
+			Kind:        constants.ClusterInfoKind,
 			Name:        "node-1",
 			Namespace:   "default",
 			ClusterInfo: &ci,
@@ -396,13 +459,13 @@ func TestStaleController_CleanupClusterInfoImport(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existCIImpList).Build()
-			fakeRemoteClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.existingResImpList).Build()
-			commonarea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", localClusterID, "antrea-mcs")
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existCIImpList).Build()
+			fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existingResImpList).Build()
+			commonarea := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "antrea-mcs", nil)
 
-			mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default")
+			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false)
 			mcReconciler.SetRemoteCommonArea(commonarea)
-			c := NewStaleResCleanupController(fakeClient, scheme, "default", mcReconciler, MemberCluster)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, MemberCluster)
 			if err := c.cleanup(); err != nil {
 				t.Errorf("StaleController.cleanup() should clean up all stale ClusterInfoImport but got err = %v", err)
 			}
@@ -520,10 +583,10 @@ func TestStaleController_CleanupMemberClusterAnnounce(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.memberClusterAnnounceList).WithLists(tt.clusterSet).Build()
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.memberClusterAnnounceList).WithLists(tt.clusterSet).Build()
 
-			mcReconciler := NewMemberClusterSetReconciler(fakeClient, scheme, "default")
-			c := NewStaleResCleanupController(fakeClient, scheme, "default", mcReconciler, LeaderCluster)
+			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, LeaderCluster)
 			assert.Equal(t, nil, c.cleanup())
 
 			memberClusterAnnounceList := &mcsv1alpha1.MemberClusterAnnounceList{}
@@ -532,6 +595,89 @@ func TestStaleController_CleanupMemberClusterAnnounce(t *testing.T) {
 			}
 
 			assert.Equal(t, tt.exceptMemberClusterAnnounceNumber, len(memberClusterAnnounceList.Items))
+		})
+	}
+}
+
+func TestStaleController_CleanupLabelIdentites(t *testing.T) {
+	normalizedLabelA := "namespace:kubernetes.io/metadata.name=test&pod:app=client"
+	normalizedLabelB := "namespace:kubernetes.io/metadata.name=test&pod:app=db"
+	labelHashA := common.HashLabelIdentity(normalizedLabelA)
+	labelHashB := common.HashLabelIdentity(normalizedLabelB)
+	labelIdentityA := mcsv1alpha1.LabelIdentity{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: labelHashA,
+		},
+		Spec: mcsv1alpha1.LabelIdentitySpec{
+			Label: normalizedLabelA,
+			ID:    1,
+		},
+	}
+	resImpA := mcsv1alpha1.ResourceImport{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "antrea-mcs",
+			Name:      labelHashA,
+		},
+		Spec: mcsv1alpha1.ResourceImportSpec{
+			Kind: constants.LabelIdentityKind,
+			LabelIdentity: &mcsv1alpha1.LabelIdentitySpec{
+				Label: normalizedLabelA,
+				ID:    1,
+			},
+		},
+	}
+	labelIdentityB := mcsv1alpha1.LabelIdentity{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: labelHashB,
+		},
+		Spec: mcsv1alpha1.LabelIdentitySpec{
+			Label: normalizedLabelB,
+			ID:    2,
+		},
+	}
+	tests := []struct {
+		name                   string
+		existLabelIdentityList *mcsv1alpha1.LabelIdentityList
+		existingResImpList     *mcsv1alpha1.ResourceImportList
+		wantErr                bool
+	}{
+		{
+			name: "clean up LabelIdentities successfully",
+			existLabelIdentityList: &mcsv1alpha1.LabelIdentityList{
+				Items: []mcsv1alpha1.LabelIdentity{
+					labelIdentityA, labelIdentityB,
+				},
+			},
+			existingResImpList: &mcsv1alpha1.ResourceImportList{
+				Items: []mcsv1alpha1.ResourceImport{
+					resImpA,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existLabelIdentityList).Build()
+			fakeRemoteClient := fake.NewClientBuilder().WithScheme(common.TestScheme).WithLists(tt.existingResImpList).Build()
+			ca := commonarea.NewFakeRemoteCommonArea(fakeRemoteClient, "leader-cluster", common.LocalClusterID, "antrea-mcs", nil)
+
+			mcReconciler := member.NewMemberClusterSetReconciler(fakeClient, common.TestScheme, "default", false)
+			mcReconciler.SetRemoteCommonArea(ca)
+			c := NewStaleResCleanupController(fakeClient, common.TestScheme, "default", mcReconciler, MemberCluster)
+			if err := c.cleanup(); err != nil {
+				t.Errorf("StaleController.cleanup() should clean up all stale LabelIdentities but got err = %v", err)
+			}
+			ctx := context.TODO()
+			labelList := &mcsv1alpha1.LabelIdentityList{}
+			err := fakeClient.List(ctx, labelList, &client.ListOptions{})
+			labelListLen := len(labelList.Items)
+			if err == nil {
+				if labelListLen != 1 {
+					t.Errorf("Should only one valid LabelIdentity left but got %v", labelListLen)
+				}
+			} else {
+				t.Errorf("Should list LabelIdentity successfully but got err = %v", err)
+			}
 		})
 	}
 }

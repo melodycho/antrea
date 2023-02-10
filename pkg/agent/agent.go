@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -77,6 +78,12 @@ var (
 
 	// getTransportIPNetDeviceByName is meant to be overridden for testing.
 	getTransportIPNetDeviceByName = GetTransportIPNetDeviceByName
+
+	// setLinkUp is meant to be overridden for testing
+	setLinkUp = util.SetLinkUp
+
+	// configureLinkAddresses is meant to be overridden for testing
+	configureLinkAddresses = util.ConfigureLinkAddresses
 )
 
 // otherConfigKeysForIPsecCertificates are configurations added to OVS bridge when AuthenticationMode is "cert" and
@@ -88,6 +95,7 @@ type Initializer struct {
 	client                clientset.Interface
 	crdClient             versioned.Interface
 	ovsBridgeClient       ovsconfig.OVSBridgeClient
+	ovsCtlClient          ovsctl.OVSCtlClient
 	ofClient              openflow.Client
 	routeClient           route.Interface
 	wireGuardClient       wireguard.Interface
@@ -100,6 +108,8 @@ type Initializer struct {
 	wireGuardConfig       *config.WireGuardConfig
 	egressConfig          *config.EgressConfig
 	serviceConfig         *config.ServiceConfig
+	l7NetworkPolicyConfig *config.L7NetworkPolicyConfig
+	enableL7NetworkPolicy bool
 	enableProxy           bool
 	connectUplinkToBridge bool
 	// networkReadyCh should be closed once the Node's network is ready.
@@ -115,6 +125,7 @@ func NewInitializer(
 	k8sClient clientset.Interface,
 	crdClient versioned.Interface,
 	ovsBridgeClient ovsconfig.OVSBridgeClient,
+	ovsCtlClient ovsctl.OVSCtlClient,
 	ofClient openflow.Client,
 	routeClient route.Interface,
 	ifaceStore interfacestore.InterfaceStore,
@@ -132,9 +143,11 @@ func NewInitializer(
 	enableProxy bool,
 	proxyAll bool,
 	connectUplinkToBridge bool,
+	enableL7NetworkPolicy bool,
 ) *Initializer {
 	return &Initializer{
 		ovsBridgeClient:       ovsBridgeClient,
+		ovsCtlClient:          ovsCtlClient,
 		client:                k8sClient,
 		crdClient:             crdClient,
 		ifaceStore:            ifaceStore,
@@ -147,6 +160,7 @@ func NewInitializer(
 		wireGuardConfig:       wireGuardConfig,
 		egressConfig:          egressConfig,
 		serviceConfig:         serviceConfig,
+		l7NetworkPolicyConfig: &config.L7NetworkPolicyConfig{},
 		networkReadyCh:        networkReadyCh,
 		stopCh:                stopCh,
 		nodeType:              nodeType,
@@ -154,6 +168,7 @@ func NewInitializer(
 		enableProxy:           enableProxy,
 		proxyAll:              proxyAll,
 		connectUplinkToBridge: connectUplinkToBridge,
+		enableL7NetworkPolicy: enableL7NetworkPolicy,
 	}
 }
 
@@ -243,6 +258,7 @@ func (i *Initializer) initInterfaceStore() error {
 		intf := &interfacestore.InterfaceConfig{
 			Type:          interfacestore.GatewayInterface,
 			InterfaceName: port.Name,
+			MAC:           port.MAC,
 			OVSPortConfig: ovsPort}
 		if intf.InterfaceName != i.hostGateway {
 			klog.Warningf("The discovered gateway interface name %s is different from the configured value: %s",
@@ -271,6 +287,7 @@ func (i *Initializer) initInterfaceStore() error {
 		return intf
 	}
 	ifaceList := make([]*interfacestore.InterfaceConfig, 0, len(ovsPorts))
+	ovsCtlClient := ovsctl.NewClient(i.ovsBridge)
 	for index := range ovsPorts {
 		port := &ovsPorts[index]
 		ovsPort := &interfacestore.OVSPortConfig{
@@ -302,9 +319,12 @@ func (i *Initializer) initInterfaceStore() error {
 				}
 			case interfacestore.AntreaContainer:
 				// The port should be for a container interface.
-				intf = cniserver.ParseOVSPortInterfaceConfig(port, ovsPort, true)
+				intf = cniserver.ParseOVSPortInterfaceConfig(port, ovsPort)
 			case interfacestore.AntreaTrafficControl:
 				intf = trafficcontrol.ParseTrafficControlInterfaceConfig(port, ovsPort)
+				if err := ovsCtlClient.SetPortNoFlood(int(ovsPort.OFPort)); err != nil {
+					klog.ErrorS(err, "Failed to set port with no-flood config", "PortName", port.Name)
+				}
 			default:
 				klog.InfoS("Unknown Antrea interface type", "type", interfaceType)
 			}
@@ -334,7 +354,7 @@ func (i *Initializer) initInterfaceStore() error {
 				antreaIFType = interfacestore.AntreaHost
 			default:
 				// The port should be for a container interface.
-				intf = cniserver.ParseOVSPortInterfaceConfig(port, ovsPort, true)
+				intf = cniserver.ParseOVSPortInterfaceConfig(port, ovsPort)
 				antreaIFType = interfacestore.AntreaContainer
 			}
 			updatedExtIDs := make(map[string]interface{})
@@ -372,6 +392,13 @@ func (i *Initializer) Initialize() error {
 
 	if err := i.setupOVSBridge(); err != nil {
 		return err
+	}
+
+	if i.enableL7NetworkPolicy {
+		// prepareL7NetworkPolicyInterfaces must be executed after setupOVSBridge since it requires interfaceStore.
+		if err := i.prepareL7NetworkPolicyInterfaces(); err != nil {
+			return err
+		}
 	}
 
 	// initializeWireGuard must be executed after setupOVSBridge as it requires gateway addresses on the OVS bridge.
@@ -475,14 +502,15 @@ func persistRoundNum(num uint64, bridgeClient ovsconfig.OVSBridgeClient, interva
 
 // initOpenFlowPipeline sets up necessary Openflow entries, including pipeline, classifiers, conn_track, and gateway flows
 // Every time the agent is (re)started, we go through the following sequence:
-//   1. agent determines the new round number (this is done by incrementing the round number
-//   persisted in OVSDB, or if it's not available by picking round 1).
-//   2. any existing flow for which the round number matches the round number obtained from step 1
-//   is deleted.
-//   3. all required flows are installed, using the round number obtained from step 1.
-//   4. after convergence, all existing flows for which the round number matches the previous round
-//   number (i.e. the round number which was persisted in OVSDB, if any) are deleted.
-//   5. the new round number obtained from step 1 is persisted to OVSDB.
+//  1. agent determines the new round number (this is done by incrementing the round number
+//     persisted in OVSDB, or if it's not available by picking round 1).
+//  2. any existing flow for which the round number matches the round number obtained from step 1
+//     is deleted.
+//  3. all required flows are installed, using the round number obtained from step 1.
+//  4. after convergence, all existing flows for which the round number matches the previous round
+//     number (i.e. the round number which was persisted in OVSDB, if any) are deleted.
+//  5. the new round number obtained from step 1 is persisted to OVSDB.
+//
 // The rationale for not persisting the new round number until after all previous flows have been
 // deleted is to avoid a situation in which some stale flows are never deleted because of successive
 // agent restarts (with the agent crashing before step 4 can be completed). With the sequence
@@ -498,7 +526,7 @@ func (i *Initializer) initOpenFlowPipeline() error {
 	roundInfo := getRoundInfo(i.ovsBridgeClient)
 
 	// Set up all basic flows.
-	ofConnCh, err := i.ofClient.Initialize(roundInfo, i.nodeConfig, i.networkConfig, i.egressConfig, i.serviceConfig)
+	ofConnCh, err := i.ofClient.Initialize(roundInfo, i.nodeConfig, i.networkConfig, i.egressConfig, i.serviceConfig, i.l7NetworkPolicyConfig)
 	if err != nil {
 		klog.Errorf("Failed to initialize openflow client: %v", err)
 		return err
@@ -539,11 +567,6 @@ func (i *Initializer) initOpenFlowPipeline() error {
 			klog.Info("Replaying OF flows to OVS bridge")
 			i.ofClient.ReplayFlows()
 			klog.Info("Flow replay completed")
-
-			if i.ovsBridgeClient.GetOVSDatapathType() == ovsconfig.OVSDatapathNetdev {
-				// we don't set flow-restore-wait when using the OVS netdev datapath
-				return
-			}
 
 			// ofClient and ovsBridgeClient have their own mechanisms to restore connections with OVS, and it could
 			// happen that ovsBridgeClient's connection is not ready when ofClient completes flow replay. We retry it
@@ -639,7 +662,8 @@ func (i *Initializer) setupGatewayInterface() error {
 		externalIDs := map[string]interface{}{
 			interfacestore.AntreaInterfaceTypeKey: interfacestore.AntreaGateway,
 		}
-		gwPortUUID, err := i.ovsBridgeClient.CreateInternalPort(i.hostGateway, config.HostGatewayOFPort, "", externalIDs)
+		mac := util.GenerateRandomMAC()
+		gwPortUUID, err := i.ovsBridgeClient.CreateInternalPort(i.hostGateway, config.HostGatewayOFPort, mac.String(), externalIDs)
 		if err != nil {
 			klog.ErrorS(err, "Failed to create gateway port on OVS bridge", "port", i.hostGateway)
 			return err
@@ -650,7 +674,7 @@ func (i *Initializer) setupGatewayInterface() error {
 			return err
 		}
 		klog.InfoS("Allocated OpenFlow port for gateway interface", "port", i.hostGateway, "ofPort", gwPort)
-		gatewayIface = interfacestore.NewGatewayInterface(i.hostGateway)
+		gatewayIface = interfacestore.NewGatewayInterface(i.hostGateway, mac)
 		gatewayIface.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: gwPortUUID, OFPort: gwPort}
 		i.ifaceStore.AddInterface(gatewayIface)
 	} else {
@@ -658,7 +682,7 @@ func (i *Initializer) setupGatewayInterface() error {
 	}
 
 	// Idempotent operation to set the gateway's MTU: we perform this operation regardless of
-	// whether or not the gateway interface already exists, as the desired MTU may change across
+	// whether the gateway interface already exists, as the desired MTU may change across
 	// restarts.
 	klog.V(4).Infof("Setting gateway interface %s MTU to %d", i.hostGateway, i.nodeConfig.NodeMTU)
 
@@ -679,7 +703,7 @@ func (i *Initializer) configureGatewayInterface(gatewayIface *interfacestore.Int
 	// Host link might not be queried at once after creating OVS internal port; retry max 5 times with 1s
 	// delay each time to ensure the link is ready.
 	for retry := 0; retry < maxRetryForHostLink; retry++ {
-		gwMAC, gwLinkIdx, err = util.SetLinkUp(i.hostGateway)
+		gwMAC, gwLinkIdx, err = setLinkUp(i.hostGateway)
 		if err == nil {
 			break
 		}
@@ -695,9 +719,17 @@ func (i *Initializer) configureGatewayInterface(gatewayIface *interfacestore.Int
 		klog.Errorf("Failed to find host link for gateway %s: %v", i.hostGateway, err)
 		return err
 	}
-
+	// Persist the MAC configured in the network interface when the gatewayIface.MAC is not set. This may
+	// happen in upgrade case.
+	// Note the "mac" field in Windows OVS internal Interface has no impact on the network adapter's actual MAC,
+	// set it to the same value just to keep consistency.
+	if bytes.Compare(gatewayIface.MAC, gwMAC) != 0 {
+		gatewayIface.MAC = gwMAC
+		if err := i.ovsBridgeClient.SetInterfaceMAC(gatewayIface.InterfaceName, gwMAC); err != nil {
+			klog.ErrorS(err, "Failed to persist interface MAC address", "interface", gatewayIface.InterfaceName, "mac", gwMAC)
+		}
+	}
 	i.nodeConfig.GatewayConfig = &config.GatewayConfig{Name: i.hostGateway, MAC: gwMAC, OFPort: uint32(gatewayIface.OFPort)}
-	gatewayIface.MAC = gwMAC
 	gatewayIface.IPs = []net.IP{}
 	if i.networkConfig.TrafficEncapMode.IsNetworkPolicyOnly() {
 		// Assign IP to gw as required by SpoofGuard.
@@ -751,8 +783,10 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 	}
 
 	// Enabling UDP checksum can greatly improve the performance for Geneve and
-	// VXLAN tunnels by triggering GRO on the receiver.
-	shouldEnableCsum := i.networkConfig.TunnelType == ovsconfig.GeneveTunnel || i.networkConfig.TunnelType == ovsconfig.VXLANTunnel
+	// VXLAN tunnels by triggering GRO on the receiver for old Linux kernel versions.
+	// It's not necessary for new Linux kernel versions with the following patch:
+	// https://github.com/torvalds/linux/commit/89e5c58fc1e2857ccdaae506fb8bc5fed57ee063.
+	shouldEnableCsum := i.networkConfig.TunnelCsum && (i.networkConfig.TunnelType == ovsconfig.GeneveTunnel || i.networkConfig.TunnelType == ovsconfig.VXLANTunnel)
 
 	// Check the default tunnel port.
 	if portExists {
@@ -761,12 +795,12 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 			tunnelIface.TunnelInterfaceConfig.DestinationPort == i.networkConfig.TunnelPort &&
 			tunnelIface.TunnelInterfaceConfig.LocalIP.Equal(localIP) {
 			klog.V(2).Infof("Tunnel port %s already exists on OVS bridge", tunnelPortName)
-			// This could happen when upgrading from previous versions that didn't set it.
-			if shouldEnableCsum && !tunnelIface.TunnelInterfaceConfig.Csum {
-				if err := i.enableTunnelCsum(tunnelPortName); err != nil {
-					return fmt.Errorf("failed to enable csum for tunnel port %s: %v", tunnelPortName, err)
+			if shouldEnableCsum != tunnelIface.TunnelInterfaceConfig.Csum {
+				klog.InfoS("Updating csum for tunnel port", "port", tunnelPortName, "csum", shouldEnableCsum)
+				if err := i.setTunnelCsum(tunnelPortName, shouldEnableCsum); err != nil {
+					return fmt.Errorf("failed to update csum for tunnel port %s to %v: %v", tunnelPortName, shouldEnableCsum, err)
 				}
-				tunnelIface.TunnelInterfaceConfig.Csum = true
+				tunnelIface.TunnelInterfaceConfig.Csum = shouldEnableCsum
 			}
 			i.nodeConfig.TunnelOFPort = uint32(tunnelIface.OFPort)
 			return nil
@@ -810,15 +844,15 @@ func (i *Initializer) setupDefaultTunnelInterface() error {
 			return err
 		}
 		klog.InfoS("Allocated OpenFlow port for tunnel interface", "port", tunnelPortName, "ofPort", tunPort)
-		tunnelIface = interfacestore.NewTunnelInterface(tunnelPortName, i.networkConfig.TunnelType, i.networkConfig.TunnelPort, localIP, shouldEnableCsum)
-		tunnelIface.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: tunnelPortUUID, OFPort: tunPort}
+		ovsPortConfig := &interfacestore.OVSPortConfig{PortUUID: tunnelPortUUID, OFPort: tunPort}
+		tunnelIface = interfacestore.NewTunnelInterface(tunnelPortName, i.networkConfig.TunnelType, i.networkConfig.TunnelPort, localIP, shouldEnableCsum, ovsPortConfig)
 		i.ifaceStore.AddInterface(tunnelIface)
 		i.nodeConfig.TunnelOFPort = uint32(tunPort)
 	}
 	return nil
 }
 
-func (i *Initializer) enableTunnelCsum(tunnelPortName string) error {
+func (i *Initializer) setTunnelCsum(tunnelPortName string, enable bool) error {
 	options, err := i.ovsBridgeClient.GetInterfaceOptions(tunnelPortName)
 	if err != nil {
 		return fmt.Errorf("error getting interface options: %w", err)
@@ -828,7 +862,7 @@ func (i *Initializer) enableTunnelCsum(tunnelPortName string) error {
 	for k, v := range options {
 		updatedOptions[k] = v
 	}
-	updatedOptions["csum"] = "true"
+	updatedOptions["csum"] = strconv.FormatBool(enable)
 	return i.ovsBridgeClient.SetInterfaceOptions(tunnelPortName, updatedOptions)
 }
 
@@ -1144,13 +1178,13 @@ func (i *Initializer) allocateGatewayAddresses(localSubnets []*net.IPNet, gatewa
 	// (i.e. portExists is false). Indeed, it may be possible for the interface to exist even if the OVS bridge does
 	// not exist.
 	// Configure any missing IP address on the interface. Remove any extra IP address that may exist.
-	if err := util.ConfigureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
+	if err := configureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
 		return err
 	}
 	// Periodically check whether IP configuration of the gateway is correct.
 	// Terminate when stopCh is closed.
 	go wait.Until(func() {
-		if err := util.ConfigureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
+		if err := configureLinkAddresses(i.nodeConfig.GatewayConfig.LinkIndex, gwIPs); err != nil {
 			klog.Errorf("Failed to check IP configuration of the gateway: %v", err)
 		}
 	}, 60*time.Second, i.stopCh)
@@ -1203,8 +1237,15 @@ func (i *Initializer) initNodeLocalConfig() error {
 			return err
 		}
 
-		i.networkConfig.IPv4Enabled = config.IsIPv4Enabled(i.nodeConfig, i.networkConfig.TrafficEncapMode)
-		i.networkConfig.IPv6Enabled = config.IsIPv6Enabled(i.nodeConfig, i.networkConfig.TrafficEncapMode)
+		i.networkConfig.IPv4Enabled, err = config.IsIPv4Enabled(i.nodeConfig, i.networkConfig.TrafficEncapMode)
+		if err != nil {
+			return err
+		}
+		i.networkConfig.IPv6Enabled, err = config.IsIPv6Enabled(i.nodeConfig, i.networkConfig.TrafficEncapMode)
+		if err != nil {
+			return err
+		}
+
 		return nil
 	}
 	if err := i.initVMLocalConfig(nodeName); err != nil {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package controller
 
 import (
 	componentbaseconfig "k8s.io/component-base/config"
@@ -67,6 +67,17 @@ type ControllerConfig struct {
 	NodeIPAM NodeIPAMConfig `yaml:"nodeIPAM"`
 	// IPsec CSR signer configuration
 	IPsecCSRSignerConfig IPsecCSRSignerConfig `yaml:"ipsecCSRSigner"`
+	// Multicluster configuration options.
+	Multicluster MulticlusterConfig `yaml:"multicluster,omitempty"`
+}
+
+type MulticlusterConfig struct {
+	// Enable Multi-cluster NetworkPolicy, including ingress rules that select peers from all
+	// clusters in a ClusterSet, and egress rules that select Multi-cluster Services.
+	EnableStretchedNetworkPolicy bool `yaml:"enableStretchedNetworkPolicy,omitempty"`
+	// The Namespace where the Antrea Multi-cluster controller is running.
+	// The default is antrea-agent's Namespace.
+	Namespace string `yaml:"namespace,omitempty"`
 }
 
 type IPsecCSRSignerConfig struct {

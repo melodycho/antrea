@@ -135,10 +135,10 @@ type CNIConfig struct {
 }
 
 // updateResultIfaceConfig processes the result from the IPAM plugin and does the following:
-//   * updates the IP configuration for each assigned IP address: this includes computing the
+//   - updates the IP configuration for each assigned IP address: this includes computing the
 //     gateway (if missing) based on the subnet and setting the interface pointer to the container
 //     interface
-//   * if there is no default route, add one using the provided default gateway
+//   - if there is no default route, add one using the provided default gateway
 func updateResultIfaceConfig(result *current.Result, defaultIPv4Gateway net.IP, defaultIPv6Gateway net.IP) {
 	for _, ipc := range result.IPs {
 		// result.Interfaces[0] is host interface, and result.Interfaces[1] is container interface
@@ -204,7 +204,7 @@ func (s *CNIServer) isCNIVersionSupported(reqVersion string) bool {
 	return exist
 }
 
-func (s *CNIServer) valiateCNIAndIPAMType(cniConfig *CNIConfig) *cnipb.CniCmdResponse {
+func (s *CNIServer) validateCNIAndIPAMType(cniConfig *CNIConfig) *cnipb.CniCmdResponse {
 	var ipamType string
 	if cniConfig.IPAM != nil {
 		ipamType = cniConfig.IPAM.Type
@@ -251,7 +251,7 @@ func (s *CNIServer) validateRequestMessage(request *cnipb.CniCmdRequest) (*CNICo
 		return nil, s.incompatibleCniVersionResponse(cniVersion)
 	}
 
-	if resp := s.valiateCNIAndIPAMType(cniConfig); resp != nil {
+	if resp := s.validateCNIAndIPAMType(cniConfig); resp != nil {
 		return nil, resp
 	}
 	if !s.isChaining && !cniConfig.secondaryNetworkIPAM {
@@ -299,12 +299,6 @@ func (s *CNIServer) incompatibleCniVersionResponse(cniVersion string) *cnipb.Cni
 func (s *CNIServer) unsupportedFieldResponse(key string, value interface{}) *cnipb.CniCmdResponse {
 	cniErrorCode := cnipb.ErrorCode_UNSUPPORTED_FIELD
 	cniErrorMsg := fmt.Sprintf("Network configuration does not support key %s and value %v", key, value)
-	return s.generateCNIErrorResponse(cniErrorCode, cniErrorMsg)
-}
-
-func (s *CNIServer) unknownContainerResponse(containerID string) *cnipb.CniCmdResponse {
-	cniErrorCode := cnipb.ErrorCode_UNKNOWN_CONTAINER
-	cniErrorMsg := fmt.Sprintf("Container id  %s is unknown or non-existent", containerID)
 	return s.generateCNIErrorResponse(cniErrorCode, cniErrorMsg)
 }
 
@@ -395,9 +389,16 @@ func (s *CNIServer) GetPodConfigurator() *podConfigurator {
 	return s.podConfigurator
 }
 
+// Declared variables for testing
+var (
+	ipamSecondaryNetworkAdd   = ipam.SecondaryNetworkAdd
+	ipamSecondaryNetworkDel   = ipam.SecondaryNetworkDel
+	ipamSecondaryNetworkCheck = ipam.SecondaryNetworkCheck
+)
+
 // Antrea IPAM for secondary network.
 func (s *CNIServer) ipamAdd(cniConfig *CNIConfig) (*cnipb.CniCmdResponse, error) {
-	ipamResult, err := ipam.SecondaryNetworkAdd(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.NetworkConfig)
+	ipamResult, err := ipamSecondaryNetworkAdd(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.NetworkConfig)
 	if err != nil {
 		return s.ipamFailureResponse(err), nil
 	}
@@ -406,14 +407,14 @@ func (s *CNIServer) ipamAdd(cniConfig *CNIConfig) (*cnipb.CniCmdResponse, error)
 }
 
 func (s *CNIServer) ipamDel(cniConfig *CNIConfig) (*cnipb.CniCmdResponse, error) {
-	if err := ipam.SecondaryNetworkDel(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.NetworkConfig); err != nil {
+	if err := ipamSecondaryNetworkDel(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.NetworkConfig); err != nil {
 		return s.ipamFailureResponse(err), nil
 	}
 	return &cnipb.CniCmdResponse{CniResult: []byte("")}, nil
 }
 
 func (s *CNIServer) ipamCheck(cniConfig *CNIConfig) (*cnipb.CniCmdResponse, error) {
-	if err := ipam.SecondaryNetworkCheck(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.NetworkConfig); err != nil {
+	if err := ipamSecondaryNetworkCheck(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.NetworkConfig); err != nil {
 		return s.ipamFailureResponse(err), nil
 	}
 	// CNI CHECK is not implemented for secondary network IPAM, and so the func will always
@@ -479,7 +480,7 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 	var ipamResult *ipam.IPAMResult
 	var err error
 	// Only allocate IP when handling CNI request from infra container.
-	// On windows platform, CNI plugin is called for all containers in a Pod.
+	// On Windows platform, CNI plugin is called for all containers in a Pod.
 	if !isInfraContainer {
 		if ipamResult, _ = ipam.GetIPFromCache(infraContainer); ipamResult == nil {
 			return nil, fmt.Errorf("allocated IP address not found")

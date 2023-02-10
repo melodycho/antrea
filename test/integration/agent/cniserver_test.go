@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strings"
@@ -609,7 +608,7 @@ func cmdAddDelCheckTest(testNS ns.NetNS, tc testCase, dataDir string) {
 	ovsPortUUID := uuid.New().String()
 	ovsServiceMock.EXPECT().CreatePort(ovsPortname, ovsPortname, mock.Any()).Return(ovsPortUUID, nil).AnyTimes()
 	ovsServiceMock.EXPECT().GetOFPort(ovsPortname, false).Return(int32(10), nil).AnyTimes()
-	ofServiceMock.EXPECT().InstallPodFlows(ovsPortname, mock.Any(), mock.Any(), mock.Any(), uint16(0)).Return(nil)
+	ofServiceMock.EXPECT().InstallPodFlows(ovsPortname, mock.Any(), mock.Any(), mock.Any(), uint16(0), nil).Return(nil)
 
 	close(tester.networkReadyCh)
 	// Test ips allocation
@@ -666,7 +665,7 @@ func TestAntreaServerFunc(t *testing.T) {
 		originalNS, err = testutils.NewNS()
 		require.Nil(t, err)
 
-		dataDir, err = ioutil.TempDir("", "antrea_server_test")
+		dataDir, err = os.MkdirTemp("", "antrea_server_test")
 		require.Nil(t, err)
 
 		ipamMock.EXPECT().Del(mock.Any(), mock.Any(), mock.Any()).Return(true, nil).AnyTimes()
@@ -828,7 +827,7 @@ func TestCNIServerChaining(t *testing.T) {
 			routeMock.EXPECT().MigrateRoutesToGw(hostVeth.Name),
 			ovsServiceMock.EXPECT().CreatePort(ovsPortname, ovsPortname, mock.Any()).Return(ovsPortUUID, nil),
 			ovsServiceMock.EXPECT().GetOFPort(ovsPortname, false).Return(testContainerOFPort, nil),
-			ofServiceMock.EXPECT().InstallPodFlows(ovsPortname, []net.IP{podIP}, containerIntf.HardwareAddr, mock.Any(), uint16(0)),
+			ofServiceMock.EXPECT().InstallPodFlows(ovsPortname, []net.IP{podIP}, containerIntf.HardwareAddr, mock.Any(), uint16(0), nil),
 		)
 		mock.InOrder(orderedCalls...)
 		cniResp, err := server.CmdAdd(ctx, cniReq)

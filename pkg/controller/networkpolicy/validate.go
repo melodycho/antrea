@@ -25,6 +25,7 @@ import (
 
 	admv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -398,7 +399,7 @@ func GetAdmissionResponseForErr(err error) *admv1.AdmissionResponse {
 func (v *antreaPolicyValidator) createValidate(curObj interface{}, userInfo authenticationv1.UserInfo) (string, bool) {
 	var tier string
 	var ingress, egress []crdv1alpha1.Rule
-	var specAppliedTo []crdv1alpha1.NetworkPolicyPeer
+	var specAppliedTo []crdv1alpha1.AppliedTo
 	switch curObj.(type) {
 	case *crdv1alpha1.ClusterNetworkPolicy:
 		curCNP := curObj.(*crdv1alpha1.ClusterNetworkPolicy)
@@ -448,6 +449,10 @@ func (v *antreaPolicyValidator) createValidate(curObj interface{}, userInfo auth
 	if !allowed {
 		return reason, allowed
 	}
+	reason, allowed = v.validateL7Protocols(ingress, egress)
+	if !allowed {
+		return reason, allowed
+	}
 	if err := v.validatePort(ingress, egress); err != nil {
 		return err.Error(), false
 	}
@@ -469,7 +474,7 @@ func (v *antreaPolicyValidator) validateRuleName(ingress, egress []crdv1alpha1.R
 	return isUnique(ingress) && isUnique(egress)
 }
 
-func (v *antreaPolicyValidator) validateAppliedTo(ingress, egress []crdv1alpha1.Rule, specAppliedTo []crdv1alpha1.NetworkPolicyPeer) (string, bool) {
+func (v *antreaPolicyValidator) validateAppliedTo(ingress, egress []crdv1alpha1.Rule, specAppliedTo []crdv1alpha1.AppliedTo) (string, bool) {
 	appliedToInSpec := len(specAppliedTo) != 0
 	countAppliedToInRules := func(rules []crdv1alpha1.Rule) int {
 		num := 0
@@ -499,10 +504,10 @@ func (v *antreaPolicyValidator) validateAppliedTo(ingress, egress []crdv1alpha1.
 		appliedToEgressRule  = 2
 	)
 
-	checkAppliedTo := func(appliedTo []crdv1alpha1.NetworkPolicyPeer, appliedToScope int) (string, bool) {
+	checkAppliedTo := func(appliedTo []crdv1alpha1.AppliedTo, appliedToScope int) (string, bool) {
 		appliedToSvcNum := 0
 		for _, eachAppliedTo := range appliedTo {
-			appliedToFieldsNum := numFieldsSetInPeer(eachAppliedTo)
+			appliedToFieldsNum := numFieldsSetInStruct(eachAppliedTo)
 			if eachAppliedTo.Group != "" && appliedToFieldsNum > 1 {
 				return "group cannot be set with other peers in appliedTo", false
 			}
@@ -556,7 +561,7 @@ func (v *antreaPolicyValidator) validatePeers(ingress, egress []crdv1alpha1.Rule
 			if peer.NamespaceSelector != nil && peer.Namespaces != nil {
 				return "namespaces and namespaceSelector cannot be set at the same time for a single NetworkPolicyPeer", false
 			}
-			peerFieldsNum := numFieldsSetInPeer(peer)
+			peerFieldsNum := numFieldsSetInStruct(peer)
 			if peer.Group != "" && peerFieldsNum > 1 {
 				return "group cannot be set with other peers in rules", false
 			}
@@ -584,7 +589,7 @@ func (v *antreaPolicyValidator) validatePeers(ingress, egress []crdv1alpha1.Rule
 				return fmt.Sprintf("`toServices` can only be used when AntreaProxy is enabled"), false
 			}
 			if (rule.To != nil && len(rule.To) > 0) || rule.Ports != nil || rule.Protocols != nil {
-				return fmt.Sprintf("`toServices` can't be used with `to`, `ports` or `protocols`"), false
+				return fmt.Sprintf("`toServices` cannot be used with `to`, `ports` or `protocols`"), false
 			}
 		}
 		msg, isValid := checkPeers(rule.To)
@@ -597,8 +602,8 @@ func (v *antreaPolicyValidator) validatePeers(ingress, egress []crdv1alpha1.Rule
 
 // validateAppliedToServiceIngressPeer ensures that if a policy or an ingress rule
 // is applied to Services, the ingress rule can only use ipBlock to select workloads.
-func (v *antreaPolicyValidator) validateAppliedToServiceIngressPeer(specAppliedTo []crdv1alpha1.NetworkPolicyPeer, ingress []crdv1alpha1.Rule) (string, bool) {
-	isAppliedToService := func(peers []crdv1alpha1.NetworkPolicyPeer) bool {
+func (v *antreaPolicyValidator) validateAppliedToServiceIngressPeer(specAppliedTo []crdv1alpha1.AppliedTo, ingress []crdv1alpha1.Rule) (string, bool) {
+	isAppliedToService := func(peers []crdv1alpha1.AppliedTo) bool {
 		if len(peers) > 0 {
 			return peers[0].Service != nil
 		}
@@ -608,7 +613,7 @@ func (v *antreaPolicyValidator) validateAppliedToServiceIngressPeer(specAppliedT
 	for _, rule := range ingress {
 		if policyAppliedToService || isAppliedToService(rule.AppliedTo) {
 			for _, peer := range rule.From {
-				if peer.IPBlock == nil || numFieldsSetInPeer(peer) > 1 {
+				if peer.IPBlock == nil || numFieldsSetInStruct(peer) > 1 {
 					return "a rule/policy that is applied to Services can only use ipBlock to select workloads", false
 				}
 			}
@@ -617,10 +622,10 @@ func (v *antreaPolicyValidator) validateAppliedToServiceIngressPeer(specAppliedT
 	return "", true
 }
 
-// numFieldsSetInPeer returns the number of fields in use of a peer.
-func numFieldsSetInPeer(peer crdv1alpha1.NetworkPolicyPeer) int {
+// numFieldsSetInStruct returns the number of fields in use of the object.
+func numFieldsSetInStruct(obj interface{}) int {
 	num := 0
-	v := reflect.ValueOf(peer)
+	v := reflect.ValueOf(obj)
 	for i := 0; i < v.NumField(); i++ {
 		if !v.Field(i).IsZero() {
 			num++
@@ -760,6 +765,42 @@ func (v *antreaPolicyValidator) validateMulticastIGMP(ingressRules, egressRules 
 	return "", true
 }
 
+// validateL7Protocols validates the L7Protocols field set in Antrea-native policy
+// rules are valid, and compatible with the ports or protocols fields.
+func (v *antreaPolicyValidator) validateL7Protocols(ingressRules, egressRules []crdv1alpha1.Rule) (string, bool) {
+	for _, r := range append(ingressRules, egressRules...) {
+		if len(r.L7Protocols) == 0 {
+			continue
+		}
+		if !features.DefaultFeatureGate.Enabled(features.L7NetworkPolicy) {
+			return fmt.Sprintf("layer 7 protocols can only be used when L7NetworkPolicy is enabled"), false
+		}
+		if *r.Action != crdv1alpha1.RuleActionAllow {
+			return "layer 7 protocols only support Allow", false
+		}
+		if len(r.ToServices) != 0 {
+			return "layer 7 protocols can not be used with toServices", false
+		}
+		haveHTTP := false
+		for _, p := range r.L7Protocols {
+			if p.HTTP != nil {
+				haveHTTP = true
+			}
+		}
+		for _, port := range r.Ports {
+			if haveHTTP && (port.Protocol != nil && *port.Protocol != v1.ProtocolTCP) {
+				return "HTTP protocol can only be used when layer 4 protocol is TCP or unset", false
+			}
+		}
+		for _, protocol := range r.Protocols {
+			if haveHTTP && (protocol.IGMP != nil || protocol.ICMP != nil) {
+				return "HTTP protocol can not be used with protocol IGMP or ICMP", false
+			}
+		}
+	}
+	return "", true
+}
+
 // validateFQDNSelectors validates the toFQDN field set in Antrea-native policy egress rules are valid.
 func (v *antreaPolicyValidator) validateFQDNSelectors(egressRules []crdv1alpha1.Rule) (string, bool) {
 	for _, r := range egressRules {
@@ -776,7 +817,7 @@ func (v *antreaPolicyValidator) validateFQDNSelectors(egressRules []crdv1alpha1.
 func (v *antreaPolicyValidator) updateValidate(curObj, oldObj interface{}, userInfo authenticationv1.UserInfo) (string, bool) {
 	var tier string
 	var ingress, egress []crdv1alpha1.Rule
-	var specAppliedTo []crdv1alpha1.NetworkPolicyPeer
+	var specAppliedTo []crdv1alpha1.AppliedTo
 	switch curObj.(type) {
 	case *crdv1alpha1.ClusterNetworkPolicy:
 		curCNP := curObj.(*crdv1alpha1.ClusterNetworkPolicy)
@@ -811,6 +852,10 @@ func (v *antreaPolicyValidator) updateValidate(curObj, oldObj interface{}, userI
 		return reason, allowed
 	}
 	reason, allowed = v.validateMulticastIGMP(ingress, egress)
+	if !allowed {
+		return reason, allowed
+	}
+	reason, allowed = v.validateL7Protocols(ingress, egress)
 	if !allowed {
 		return reason, allowed
 	}

@@ -20,7 +20,6 @@ package e2e
 
 import (
 	"flag"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -33,7 +32,7 @@ import (
 // was provided by the user, it checks that the directory exists.
 func (tOptions *TestOptions) setupLogging() func() {
 	if tOptions.logsExportDir == "" {
-		name, err := ioutil.TempDir("", "antrea-multicluster-test-")
+		name, err := os.MkdirTemp("", "antrea-multicluster-test-")
 		if err != nil {
 			log.Fatalf("Error when creating temporary directory to export logs: %v", err)
 		}
@@ -107,11 +106,16 @@ func TestConnectivity(t *testing.T) {
 		time.Sleep(5 * time.Second)
 	}
 
-	t.Run("TestMCServiceExport", func(t *testing.T) {
+	t.Run("TestMCService", func(t *testing.T) {
 		defer tearDownForServiceExportsTest(t, data)
 		initializeForServiceExportsTest(t, data)
 		t.Run("Case=MCServiceConnectivity", func(t *testing.T) { testMCServiceConnectivity(t, data) })
+		t.Run("Case=ScaleDownMCServiceEndpoints", func(t *testing.T) { testScaleDownMCServiceEndpoints(t, data) })
 		t.Run("Case=ANPToServices", func(t *testing.T) { testANPToServices(t, data) })
+		t.Run("Case=StretchedNetworkPolicy", func(t *testing.T) { testStretchedNetworkPolicy(t, data) })
+		t.Run("Case=StretchedNetworkPolicyUpdatePod", func(t *testing.T) { testStretchedNetworkPolicyUpdatePod(t, data) })
+		t.Run("Case=StretchedNetworkPolicyUpdateNS", func(t *testing.T) { testStretchedNetworkPolicyUpdateNS(t, data) })
+		t.Run("Case=StretchedNetworkPolicyUpdatePolicy", func(t *testing.T) { testStretchedNetworkPolicyUpdatePolicy(t, data) })
 	})
 
 	t.Run("TestAntreaPolicy", func(t *testing.T) {

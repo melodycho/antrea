@@ -51,6 +51,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CURDIR)/hack/generate-manifest.sh -g > build/yamls/antrea-multicluster-leader-global.yml
 	$(CURDIR)/hack/generate-manifest.sh -l antrea-multicluster > build/yamls/antrea-multicluster-leader-namespaced.yml
 	$(CURDIR)/hack/generate-manifest.sh -m > build/yamls/antrea-multicluster-member.yml
+	$(CURDIR)/hack/update-checksum.sh
 
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..."
@@ -93,6 +94,11 @@ controller-gen: ## Download controller-gen locally if necessary.
 
 codegen:
 	./hack/update-codegen.sh
+
+.PHONY: mockgen
+mockgen:
+	@echo "===> Updating generated mock code <==="
+	$(CURDIR)/hack/update-codegen.sh mockgen
 
 # go-get-tool will 'go get' any package $2 and install it to $1.
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
