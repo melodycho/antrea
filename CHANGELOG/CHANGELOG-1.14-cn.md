@@ -23,7 +23,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 
 ## 其他变更
 
-- 多个API从beta版本升级至GA版本，Antrea配置文件中相应的功能开关已移除。
+- 多个API从Beta版本升级至GA版本，Antrea配置文件中相应的功能开关已移除。
    将EndpointSlice功能提升至GA版本。（#5393, @hongliangl）
    将NodePortLocal功能提升至GA版本。（#5491, @hjiajing）
    将AntreaProxy功能门提至GA版本，并添加antreaProxy.enable选项，以允许用户禁用该功能。（#5401, @hongliangl）
