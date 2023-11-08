@@ -62,7 +62,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 - 修复处理ANP命名端口时Service中的协议丢失问题，以确保可以正确执行OVS中的规则。（#5370, @Dyanngg）
 - 修复在Agent无法连接到K8s API时的错误日志。（#5353, @tnqn）
 - 修复Antrea Multi-cluster中ClusterSet状态未更新的bug。（#5338, @luolanzone）
-- 修复Antrea Multi-cluster启用enableStretchedNetworkPolicy时，Antrea Controller在处理LabelIdentity中空Pod标签时导致的崩溃问题。（#5404 #5449, @Dyanngg）
+- 修复Antrea Multi-cluster启用enableStretchedNetworkPolicy的情况下，Antrea Controller处理LabelIdentity时Pod空标签导致的崩溃问题。（#5404 #5449, @Dyanngg）
 - 始终初始化ovs_meter_packet_dropped_count指标，以修复在系统不支持OVS Meter的情况下指标未显示的问题。（#5413, @tnqn）
 - 为避免RBAC警告导致日志泛滥，跳过不需要的VM Agent模块的启动。（#5391, @mengdie-song）
 
