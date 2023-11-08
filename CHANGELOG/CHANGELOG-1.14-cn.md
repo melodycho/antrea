@@ -29,30 +29,30 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
    将AntreaProxy功能门提至GA版本，并添加antreaProxy.enable选项，以允许用户禁用该功能。（#5401, @hongliangl）
 - 使antrea-controller不容忍不可达的Node，以加速故障转移过程。（#5521, @tnqn）
 - 改进antctl get featuregates输出。（#5314, @cr7258）
-- 增加PacketInMeter的速率限制设置和PacketInQueue的大小。（#5460, @GraysonWu）
+- 提高PacketInMeter的限制速率和PacketInQueue的大小。（#5460, @GraysonWu）
 - 为Flow Aggregator的Helm values添加hostAliases。（#5386, @yuntanghsu）
-- 解除审计日志对AntreaPolicy功能门的依赖，以在禁用AntreaPolicy时启用NetworkPolicy的日志记录。（#5352, @qiyueyao）
+- 解除审计日志对AntreaPolicy功能开关的依赖，允许禁用AntreaPolicy时启用NetworkPolicy的日志记录。（#5352, @qiyueyao）
 - 将Traceflow CRD验证更改为webhook验证。（#5230, @shi0rik0）
 - 停止在Antrea Agent中使用/bin/sh，并直接调用二进制文件执行OVS命令。（#5364, @antoninbas）
-- 仅在启用Antrea Multi-cluster时，在EndpointDNAT中为嵌套服务安装流。（#5411, @hongliangl）
-- 使PacketIn消息的速率限制可配置；对于依赖PacketIn消息的每个功能（例如Traceflow），都适用相同的速率限制值，但针对每个功能独立执行限制。（#5450, @GraysonWu）
-- 将ARPSpoofGuardTable中默认流的动作更改为drop，有效地防止ARP欺骗。（#5378, @hongliangl）
-- 删除ConfigMap名称的自动生成后缀，并在Windows yaml的Deployment注释中添加配置校验和，以在更新Antrea时避免旧的ConfigMaps，同时保留Pod的自动滚动更新。（#5545, @Atish-iaf）
-- 为leader集群添加ClusterSet删除webhook，以拒绝存在任何MemberClusterAnnounce资源的ClusterSet删除请求。（#5475, @luolanzone）
+- 仅在启用Antrea Multi-cluster时，在EndpointDNAT表中为嵌套服务安装流。（#5411, @hongliangl）
+- 允许用户配置PacketIn消息的速率限制；对于依赖PacketIn消息的多个功能（例如Traceflow），都使用相同的速率限制值，但针对每个功能独立执行限制。（#5450, @GraysonWu）
+- 将ARPSpoofGuardTable中默认流的动作更改为drop，有效防止ARP欺骗。（#5378, @hongliangl）
+- 删除ConfigMap名称的自动后缀，并在Windows yaml的Deployment注释中添加配置校验和，以在更新Antrea时避免残留旧的ConfigMaps，同时保留Pod的自动滚动更新。（#5545, @Atish-iaf）
+- 在Antrea多集群的leader集群中为ClusterSet删除行为添加webhook，以拒绝存在任何MemberClusterAnnounce资源的情况下删除ClusterSet。（#5475, @luolanzone）
 - 将Go版本更新至v1.21。（#5377, @antoninbas）
 
 
 ## 问题修复
 
-- 移除MulticastGroup API对NetworkPolicyStats功能开关的依赖，以修复用户运行kubectl get multicastgroups时即使启用了Multicast，仍出现空列表的问题。（#5367, @ceclinux）
-- 修复Traceflow使用IPv6地址时antctl tf CLI失败的问题。（#5588, @Atish-iaf）
+- 移除MulticastGroup API对NetworkPolicyStats功能开关的依赖，以修复即使启用了Multicast的情况下，用户运行kubectl get multicastgroups时仍出现空列表的问题。（#5367, @ceclinux）
+- 修复Traceflow使用IPv6地址时antctl tf命令失败的问题。（#5588, @Atish-iaf）
 - 修复NetworkPolicy Controller中的死锁问题，此问题可能导致FQDN解析失败。（#5566 #5583, @Dyanngg @tnqn）
-- 修复NetworkPolicy span计算问题，避免多个NetworkPolicies具有相同选择器时过时数据的问题。（#5554, @tnqn）
+- 修复NetworkPolicy span计算问题，避免多个NetworkPolicies具有相同选择器时发生数据过时的问题。（#5554, @tnqn）
 - 获取Node地址时使用第一个匹配地址，以找到正确的传输接口。（#5529, @xliuxu）
-- 修复在CNI服务在CmdAdd失败后触发回滚调用的问题，并改进日志记录。（#5548, @antoninbas）
+- 修复CNI服务在CmdAdd失败后触发回滚调用的问题，并改进日志记录。（#5548, @antoninbas）
 - 在Antrea网络的MTU超过Suricata支持的最大值时添加错误日志。（#5408, @hongliangl）
-- 在路由协调器中不要删除IPv6链路本地路由，以修复跨Node Pod流量或Pod到外部流量的问题。（#5483, @wenyingd）
-- 不将Egress应用于ServiceCIDRs的流量，以避免性能问题和意外行为。（#5495, @tnqn）
+- 在路由控制器中避免删除IPv6链路本地路由，以修复跨节点的Pod流量或Pod到外部流量的通信问题。（#5483, @wenyingd）
+- 不将Egress应用于ServiceCIDRs的流量，以避免性能问题和非预期行为。（#5495, @tnqn）
 - 统一TCP和UDP DNS拦截流规则，以修复DNS响应的无效流匹配问题。（#5392, @GraysonWu）
 - 更改PacketInQueue的burst设置，以减少应用FQDN策略的Pod的DNS响应延迟。（#5456, @tnqn）
 - 修复Install-OVS.ps1在Windows上SSL依赖库下载失败的问题。（#5510, @XinShuYang）
