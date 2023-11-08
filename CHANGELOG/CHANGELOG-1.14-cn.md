@@ -9,7 +9,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 
 ## 主要功能
 - 新增Egress速率限制配置，用于限制该Egress指定Pod的南北向出口流量的速率。（#5425, @GraysonWu）
-- 在Egress状态中添加IPAllocated和IPAssigned状态，可以查询Egress IP的分配和挂载状态，以提高Egress的可见性。（#5282, @AJPL88 @tnqn）
+- 在Egress状态中添加IPAllocated和IPAssigned字段，可以查询Egress IP的分配和挂载状态，以提高Egress的可见性。（#5282, @AJPL88 @tnqn）
 - 在SupportBundle中为Antrea Agent和Antrea Controller添加goroutine堆栈转储。（#5538, @aniketraj1947）
 - 在AntreaProxy服务的健康检查中添加“X-Load-Balancing-Endpoint-Weight”标头。（#5299, @hongliangl）
 - 在Antrea Agent配置中为审计日志添加日志轮转配置。（#5337 #5366, @antoninbas @mengdie-song）
