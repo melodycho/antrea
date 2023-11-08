@@ -53,7 +53,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 - 在Antrea网络的MTU超过Suricata支持的最大值时添加错误日志。（#5408, @hongliangl）
 - 在路由协调器中不要删除IPv6链路本地路由，以修复跨Node Pod流量或Pod到外部流量的问题。（#5483, @wenyingd）
 - 不将Egress应用于ServiceCIDRs的流量，以避免性能问题和意外行为。（#5495, @tnqn）
-- 统一TCP和UDP DNS拦截流，以修复DNS响应的无效流匹配问题。（#5392, @GraysonWu）
+- 统一TCP和UDP DNS拦截流规则，以修复DNS响应的无效流匹配问题。（#5392, @GraysonWu）
 - 更改PacketInQueue的burst设置，以减少应用FQDN策略的Pod的DNS响应延迟。（#5456, @tnqn）
 - 修复Install-OVS.ps1在Windows上SSL依赖库下载失败的问题。（#5510, @XinShuYang）
 - 避免将Windows antrea-agents加入到memberlist集群，以修复引起误导的错误日志。（#5434, @tnqn）
