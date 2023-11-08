@@ -16,7 +16,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 - 为Antrea Go clientset添加GroupMembers API分页支持。（#5533, @qiyueyao）
 - 为Antrea Controller添加Namespaced Group Membership API。（#5380, @qiyueyao）
 - 在VLAN网络上支持Pod的secondary interface。（#5341 #5365 #5279, @jianjuns）
-- Windows OVS容器可以在主机环境上直接运行，无需提前手动安装某些依赖项。（#5440, @NamanAg30）
+- 支持Windows OVS容器在主机环境上直接运行，无需提前手动安装某些依赖项。（#5440, @NamanAg30）
 - 更新Install-WindowsCNI-Containerd.ps1脚本，使其兼容containerd 1.7。（#5528, @NamanAg30）
 - 为Multi-cluster leader集群添加新的一键安装yaml，并更新Multi-cluster用户指南。（#5389 #5531, @luolanzone）
 - 在删除ClusterSet时清理leader和member集群中自动生成的资源，并在member集群重新加入ClusterSet时重新创建资源。（#5351 #5410, @luolanzone）
