@@ -55,7 +55,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 - 不将Egress应用于ServiceCIDRs的流量，以避免性能问题和意外行为。（#5495, @tnqn）
 - 统一TCP和UDP DNS拦截流，以修复DNS响应的无效流匹配问题。（#5392, @GraysonWu）
 - 更改PacketInQueue的burst设置，以减少应用FQDN策略的Pod的DNS响应延迟。（#5456, @tnqn）
-- 修复Install-OVS.ps1在Windows上SSL库下载失败的问题。（#5510, @XinShuYang）
+- 修复Install-OVS.ps1在Windows上SSL依赖库下载失败的问题。（#5510, @XinShuYang）
 - 避免将Windows antrea-agents加入到memberlist集群，以避免引起误导的错误日志。（#5434, @tnqn）
 - 修复antctl proxy未使用用户指定端口的问题。（#5435, @tnqn）
 - 在桥接模式下，根据需要在OVS内部端口上启用IPv6，以修复启用IPAM时Agent崩溃的问题。（#5409, @antoninbas）
