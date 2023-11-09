@@ -39,7 +39,7 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 - 允许用户配置PacketIn消息的速率限制；对于依赖PacketIn消息的多个功能（例如Traceflow），都使用相同的速率限制值，但针对每个功能独立执行限制。（#5450, @GraysonWu）
 - 将ARPSpoofGuardTable中默认流的动作更改为drop，有效防止ARP欺骗。（#5378, @hongliangl）
 - 删除ConfigMap名称的自动后缀，并在Windows yaml的Deployment注释中添加配置校验和，以在更新Antrea时避免残留旧的ConfigMaps，同时保留Pod的自动滚动更新。（#5545, @Atish-iaf）
-- 在Antrea多集群的leader集群中为ClusterSet删除行为添加webhook，以拒绝存在任何MemberClusterAnnounce资源的情况下删除ClusterSet。（#5475, @luolanzone）
+- 在Antrea多集群的leader集群中为ClusterSet删除行为添加webhook，防止存在任何MemberClusterAnnounce资源的情况下删除ClusterSet。（#5475, @luolanzone）
 - 将Go版本更新至v1.21。（#5377, @antoninbas）
 
 
@@ -48,24 +48,24 @@ Antrea v1.14.0的发布非常值得关注，首先AntreaProxy、NodePortLocal和
 - 移除MulticastGroup API对NetworkPolicyStats功能开关的依赖，以修复即使启用了Multicast的情况下，用户运行kubectl get multicastgroups时仍出现空列表的问题。（#5367, @ceclinux）
 - 修复Traceflow使用IPv6地址时antctl tf命令失败的问题。（#5588, @Atish-iaf）
 - 修复NetworkPolicy Controller中的死锁问题，此问题可能导致FQDN解析失败。（#5566 #5583, @Dyanngg @tnqn）
-- 修复NetworkPolicy span计算问题，避免多个NetworkPolicies具有相同选择器时发生数据过时的问题。（#5554, @tnqn）
-- 获取Node地址时使用第一个匹配地址，以找到正确的传输接口。（#5529, @xliuxu）
+- 修复NetworkPolicy span计算问题，避免多个NetworkPolicies具有相同选择器时可能产生过期数据的问题。（#5554, @tnqn）
+- 获取Node地址时仅使用第一个匹配地址，以确保找到正确的传输接口。（#5529, @xliuxu）
 - 修复CNI服务在CmdAdd失败后触发回滚调用的问题，并改进日志记录。（#5548, @antoninbas）
-- 在Antrea网络的MTU超过Suricata支持的最大值时添加错误日志。（#5408, @hongliangl）
+- 在Antrea网络的MTU超过Suricata支持的最大值时输出错误日志。（#5408, @hongliangl）
 - 在路由控制器中避免删除IPv6链路本地路由，以修复跨节点的Pod流量或Pod到外部流量的通信问题。（#5483, @wenyingd）
-- 不将Egress应用于ServiceCIDRs的流量，以避免性能问题和非预期行为。（#5495, @tnqn）
+- 不再将Egress应用于访问ServiceCIDRs的流量，以避免性能问题和一些异常行为。（#5495, @tnqn）
 - 统一TCP和UDP DNS拦截流规则，以修复DNS响应的无效流匹配问题。（#5392, @GraysonWu）
 - 更改PacketInQueue的burst设置，以减少应用FQDN策略的Pod的DNS响应延迟。（#5456, @tnqn）
 - 修复Install-OVS.ps1在Windows上SSL依赖库下载失败的问题。（#5510, @XinShuYang）
-- 避免将Windows antrea-agents加入到memberlist集群，以修复引起误导的错误日志。（#5434, @tnqn）
+- 避免将Windows antrea-agents加入到memberlist集群，防止产生一些误导性的错误日志。（#5434, @tnqn）
 - 修复antctl proxy未使用用户指定端口的问题。（#5435, @tnqn）
 - 在桥接模式下，根据需要在OVS内部端口上启用IPv6，以修复启用IPAM时Agent崩溃的问题。（#5409, @antoninbas）
-- 修复处理ANP命名端口时Service中的协议丢失问题，以确保可以正确执行OVS中的规则。（#5370, @Dyanngg）
+- 修复处理ANP命名端口时缺少协议信息的问题，以确保可以正确执行OVS中的规则。（#5370, @Dyanngg）
 - 修复在Agent无法连接到K8s API时的错误日志。（#5353, @tnqn）
 - 修复Antrea Multi-cluster中ClusterSet状态未更新的bug。（#5338, @luolanzone）
 - 修复Antrea Multi-cluster启用enableStretchedNetworkPolicy的情况下，Antrea Controller处理LabelIdentity时Pod空标签导致的崩溃问题。（#5404 #5449, @Dyanngg）
 - 始终初始化ovs_meter_packet_dropped_count指标，以修复在系统不支持OVS Meter的情况下指标未显示的问题。（#5413, @tnqn）
-- 为避免RBAC警告导致日志泛滥，跳过不需要的VM Agent模块的启动。（#5391, @mengdie-song）
+- 为避免RBAC警告导致日志泛滥，运行VM Agent模式跳过不需要的模块的启动。（#5391, @mengdie-song）
 
 
 ## 致谢
