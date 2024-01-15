@@ -88,6 +88,8 @@ type NetworkPolicyInfo struct {
 	Name      string
 	Namespace string
 	Spec      netv1.NetworkPolicySpec
+	fromPod   string
+	toIP      string
 }
 
 func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool) (nps []NetworkPolicyInfo, err error) {
@@ -125,7 +127,6 @@ func SelectConnectPod(ctx context.Context, cs kubernetes.Interface, ns string, n
 	if _, ok := np.Spec.PodSelector.MatchLabels[utils.PodOnRealNodeLabelKey]; !ok {
 		np.Spec.PodSelector.MatchLabels[utils.PodOnRealNodeLabelKey] = ""
 	}
-	klog.InfoS("Podselect", "PodSelector", np.Spec.PodSelector)
 	podList, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: metav1.FormatLabelSelector(&np.Spec.PodSelector)})
 	if err != nil {
 		return nil, "", fmt.Errorf("error when selecting networkpolicy applied to pods: %w", err)

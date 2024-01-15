@@ -238,12 +238,17 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	if err != nil {
 		return nil, fmt.Errorf("error when creating kubernetes client: %w", err)
 	}
-	masterNodes, err := kClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "node-role.kubernetes.io/control-plane="})
+
+	controlPlaneNodes, err := kClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "node-role.kubernetes.io/control-plane="})
 	if err != nil {
 		return nil, fmt.Errorf("error when getting Nodes in the cluster: %w", err)
 	}
-	if len(masterNodes.Items) == 0 {
-		return nil, fmt.Errorf("can not find a master Node in the cluster")
+	masterNodes, err := kClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{LabelSelector: "node-role.kubernetes.io/master="})
+	if err != nil {
+		return nil, fmt.Errorf("error when getting Nodes in the cluster: %w", err)
+	}
+	if len(masterNodes.Items) == 0 && len(controlPlaneNodes.Items) == 0 {
+		return nil, fmt.Errorf("can not find a master/control-plane Node in the cluster")
 	}
 
 	td.kubernetesClientSet = kClient

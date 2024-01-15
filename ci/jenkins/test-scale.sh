@@ -27,17 +27,10 @@ WORKDIR=$DEFAULT_WORKDIR
 KUBECONFIG_PATH=$DEFAULT_KUBECONFIG_PATH
 TESTCASE=""
 TEST_FAILURE=false
-MODE="report"
 DOCKER_REGISTRY=$(head -n1 "${WORKSPACE}/ci/docker-registry")
 TESTBED_TYPE="legacy"
-GO_VERSION=$(head -n1 "${WORKSPACE}/build/images/deps/go-version")
 IMAGE_PULL_POLICY="Always"
-DEFAULT_IP_MODE="ipv4"
-IP_MODE=""
 GOLANG_RELEASE_DIR=${WORKDIR}/golang-releases
-
-CONFORMANCE_SKIP="\[Slow\]|\[Serial\]|\[Disruptive\]|\[Flaky\]|\[Feature:.+\]|\[sig-cli\]|\[sig-storage\]|\[sig-auth\]|\[sig-api-machinery\]|\[sig-apps\]|\[sig-node\]"
-NETWORKPOLICY_SKIP="NetworkPolicyLegacy|should allow egress access to server in CIDR block|should enforce except clause while egress access to server in CIDR block"
 
 CONTROL_PLANE_NODE_ROLE="master|control-plane"
 
@@ -117,8 +110,6 @@ if [[ "$DOCKER_REGISTRY" != "" ]]; then
     NO_PULL=1
 fi
 export NO_PULL
-
-E2ETEST_PATH=${WORKDIR}/kubernetes/_output/dockerized/bin/linux/amd64/e2e.test
 
 function export_govc_env_var {
     env_govc="${WORKDIR}/govc.env"
@@ -275,12 +266,19 @@ function generate_ssh_config {
 }
 
 function prepare_scale_simulator {
+    ## Try best to clean up old config.
+    kubectl delete -f "${WORKSPACE}/build/yamls/antrea-agent-simulator.yml" || true
+    kubectl delete secret kubeconfig || true
+
+    # Create simulators.
     kubectl taint -l 'antrea/instance=simulator' node mocknode=true:NoExecute
-    kubectl create secret generic kubeconfig --type=Opaque --namespace=kube-system --from-file=${WORKDIR}/.kube
+    kubectl create secret generic kubeconfig --type=Opaque --namespace=kube-system --from-file=admin.conf=${WORKDIR}/.kube
+
+    kubectl apply -f "${WORKSPACE}/build/yamls/antrea-agent-simulator.yml"
 }
 
 function run_scale_test {
-    echo "====== Running Antrea E2E Tests ======"
+    echo "====== Running Antrea Scale Tests ======"
     export GO111MODULE=on
     export GOPATH=${WORKDIR}/go
     export GOROOT=${GOLANG_RELEASE_DIR}/go
@@ -293,6 +291,8 @@ function run_scale_test {
     generate_ssh_config
 
     set +e
+    ls ${WORKSPACE}
+    make bin
     ${WORKSPACE}/bin/antrea-scale --config ./test/performance/scale.yml
     set -e
 
@@ -314,13 +314,13 @@ function clean_tmp() {
 
 export KUBECONFIG=${KUBECONFIG_PATH}
 
-source $WORKSPACE/ci/jenkins/utils.sh
-check_and_upgrade_golang
-clean_tmp
-
-trap clean_antrea EXIT
-deliver_antrea_scale
-prepare_scale_simulator
+#source $WORKSPACE/ci/jenkins/utils.sh
+#check_and_upgrade_golang
+#clean_tmp
+#
+#trap clean_antrea EXIT
+#deliver_antrea_scale
+#prepare_scale_simulator
 run_scale_test
 
 if [[ ${TEST_FAILURE} == true ]]; then
