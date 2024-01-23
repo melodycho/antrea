@@ -314,8 +314,8 @@ function clean_tmp() {
 
 export KUBECONFIG=${KUBECONFIG_PATH}
 
-#source $WORKSPACE/ci/jenkins/utils.sh
-#check_and_upgrade_golang
+source $WORKSPACE/ci/jenkins/utils.sh
+check_and_upgrade_golang
 #clean_tmp
 #
 #trap clean_antrea EXIT
