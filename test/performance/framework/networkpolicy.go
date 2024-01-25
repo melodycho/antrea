@@ -29,8 +29,9 @@ func init() {
 	RegisterFunc("ScaleNetworkPolicy", ScaleNetworkPolicy)
 }
 
-func ScaleNetworkPolicy(ctx context.Context, data *ScaleData) error {
-	nps, err := networkpolicy.ScaleUp(ctx, data.kubernetesClientSet, data.namespaces, data.Specification.NpNumPerNs, data.Specification.IPv6)
+func ScaleNetworkPolicy(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+	nps, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
+		data.Specification.NpNumPerNs, data.clientPods, data.Specification.IPv6)
 	if err != nil {
 		return fmt.Errorf("scale up NetworkPolicies error: %v", err)
 	}
@@ -49,7 +50,7 @@ func ScaleNetworkPolicy(ctx context.Context, data *ScaleData) error {
 		if err != nil || fromPod == nil || ip == "" {
 			continue
 		}
-		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, fromPod, ip); err != nil {
+		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, fromPod.Namespace, fromPod.Name, ip); err != nil {
 			return fmt.Errorf("the connection should be success, NetworkPolicyName: %s, FromPod: %s, ToPod: %s",
 				np.Name, fromPod.Name, ip)
 		}
@@ -59,11 +60,17 @@ func ScaleNetworkPolicy(ctx context.Context, data *ScaleData) error {
 		if err != nil || fromPod == nil || ip == "" {
 			continue
 		}
-		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, fromPod, ip); err == nil {
+		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, fromPod.Namespace, fromPod.Name, ip); err == nil {
 			return fmt.Errorf("the connection should not be success, NetworkPolicyName: %s, FromPod: %s, ToPodIP: %s", np.Name, fromPod.Name, ip)
 		}
 		klog.InfoS("Checked networkPolicy", "Name", np.Name, "Namespace", np.Namespace, "count", i, "maxNum", maxNPCheckedCount)
 	}
+	respTime := ResponseTime{
+		max: 1,
+		min: 5,
+		avg: 3,
+	}
+	ch <- respTime
 	if err := networkpolicy.ScaleDown(ctx, data.namespaces, data.kubernetesClientSet); err != nil {
 		return err
 	}

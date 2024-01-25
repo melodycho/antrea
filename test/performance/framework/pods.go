@@ -98,7 +98,7 @@ func newWorkloadPod(podName, ns string, onRealNode bool, labelNum int) *corev1.P
 	return workloadPodTemplate(podName, ns, labels, onRealNode)
 }
 
-func ScaleUpWorkloadPods(ctx context.Context, data *ScaleData) error {
+func ScaleUpWorkloadPods(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
 	if data.Specification.SkipDeployWorkload {
 		klog.V(2).InfoS("Skip creating workload Pods", "SkipDeployWorkload", data.Specification.SkipDeployWorkload)
 		return nil

@@ -17,6 +17,7 @@ package networkpolicy
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/rest"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,14 +86,15 @@ func generateNetworkPolicies(ns string, num int) ([]*netv1.NetworkPolicy, error)
 }
 
 type NetworkPolicyInfo struct {
-	Name      string
-	Namespace string
-	Spec      netv1.NetworkPolicySpec
-	fromPod   string
-	toIP      string
+	Name             string
+	Namespace        string
+	Spec             netv1.NetworkPolicySpec
+	fromPodName      string
+	fromPodNamespace string
+	toIP             string
 }
 
-func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool) (nps []NetworkPolicyInfo, err error) {
+func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool) (nps []NetworkPolicyInfo, err error) {
 	// ScaleUp networkPolicies
 	start := time.Now()
 	for _, ns := range nss {
@@ -111,7 +113,34 @@ func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerN
 						return err
 					}
 				}
-				nps = append(nps, NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec})
+				npInfo := NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
+
+				// // Check connection of Pods in NetworkPolicies, workload Pods
+				// fromPod, ip, err := SelectConnectPod(ctx, cs, newNP.Namespace, &npInfo)
+				// if err != nil {
+				// 	return err
+				// }
+				// npInfo.fromPodName = fromPod.Name
+				// npInfo.fromPodNamespace = fromPod.Namespace
+				// npInfo.toIP = ip
+				// go func() {
+				// 	if err := framework.PingIP(ctx, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip); err != nil {
+				// 		klog.ErrorS(err, "the connection should be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
+				// 	}
+				// }()
+				//
+				// // Check isolation of Pods in NetworkPolicies, client Pods to workload Pods
+				// fromPod, ip, err = SelectIsoPod(ctx, cs, np.Namespace, npInfo, clientPods)
+				// if err != nil {
+				// 	return err
+				// }
+				// go func() {
+				// 	if err := framework.PingIP(ctx, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip); err == nil {
+				// 		klog.ErrorS(err, "the connection should not be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
+				// 	}
+				// }()
+
+				nps = append(nps, npInfo)
 				return nil
 			}); err != nil {
 				return nil, err

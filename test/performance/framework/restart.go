@@ -33,7 +33,7 @@ func init() {
 	RegisterFunc("RestartOVSContainer", RestartOVSContainer)
 }
 
-func ScaleRestartAgent(ctx context.Context, data *ScaleData) error {
+func ScaleRestartAgent(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
 	err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-agent"})
 	if err != nil {
@@ -56,7 +56,7 @@ func ScaleRestartAgent(ctx context.Context, data *ScaleData) error {
 	}, ctx.Done())
 }
 
-func RestartController(ctx context.Context, data *ScaleData) error {
+func RestartController(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
 	err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
 	if err != nil {
@@ -75,6 +75,6 @@ func RestartController(ctx context.Context, data *ScaleData) error {
 	}, ctx.Done())
 }
 
-func RestartOVSContainer(ctx context.Context, data *ScaleData) error {
-	return ScaleRestartAgent(ctx, data)
+func RestartOVSContainer(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+	return ScaleRestartAgent(ctx, ch, data)
 }
