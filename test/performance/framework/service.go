@@ -49,7 +49,7 @@ func ScaleService(ctx context.Context, data *ScaleData) error {
 		k := int(utils.GenRandInt()) % len(data.clientPods)
 		clientPod := data.clientPods[k]
 		svc := svcs[i]
-		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, &clientPod, svc.IP); err != nil {
+		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, clientPod.Namespace, clientPod.Name, svc.IP); err != nil {
 			klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 			return err
 		}

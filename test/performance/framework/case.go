@@ -25,7 +25,7 @@ import (
 	"antrea.io/antrea/test/performance/framework/table"
 )
 
-type RunFunc func(ctx context.Context, data *ScaleData) error
+type RunFunc func(ctx context.Context, ch chan ResponseTime, data *ScaleData) error
 
 var cases = make(map[string]RunFunc, 128)
 
@@ -56,8 +56,10 @@ func (c *ScaleTestCase) Name() string {
 	return c.name
 }
 
-func (c *ScaleTestCase) Includes(testCases ...ScaleTestCase) ScaleTestCase {
-	panic("ScaleTestCase does not support subside test cases")
+type ResponseTime struct {
+	max time.Duration
+	min time.Duration
+	avg time.Duration
 }
 
 func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
@@ -65,16 +67,22 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 
 	startTime := time.Now()
 	caseName := ctx.Value(CtxScaleCaseName).(string)
+	// avgTime := ctx.Value(CtxAverageResponseTime).(string)
+	// maxTime := ctx.Value(CtxMaxResponseTime).(string)
+	// minTime := ctx.Value(CtxMinResponseTime).(string)
+	ch := make(chan ResponseTime, 1)
 	res := "failed"
 	defer func() {
 		var rows [][]string
-		rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime)))
+		respTime := <-ch
+		rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime),
+			respTime.avg.String(), respTime.max.String(), respTime.min.String()))
 		table.ShowResult(os.Stdout, rows)
 	}()
 
 	done := make(chan interface{}, 1)
 	go func() {
-		done <- c.run(ctx, testData)
+		done <- c.run(ctx, ch, testData)
 	}()
 
 	select {
@@ -92,7 +100,10 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 type CtxScaleCaseNameType string
 
 const (
-	CtxScaleCaseName CtxScaleCaseNameType = "scale-case-name"
+	CtxScaleCaseName       CtxScaleCaseNameType = "scale-case-name"
+	CtxAverageResponseTime                      = "AverageResponseTime"
+	CtxMaxResponseTime                          = "MaxResponseTime"
+	CtxMinResponseTime                          = "MinResponseTime"
 )
 
 func wrapScaleTestName(ctx context.Context, name string) context.Context {

@@ -20,11 +20,13 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+
+	"antrea.io/antrea/test/performance/framework"
 )
 
-func GenerateRow(name, result string, duration time.Duration) []string {
+func GenerateRow(name, result string, duration time.Duration, avgTime, maxTime, minTime string) []string {
 	name = strings.ReplaceAll(name, " ", "-")
-	return []string{name, result, duration.String()}
+	return []string{name, result, duration.String(), avgTime, maxTime, minTime}
 }
 
 func ShowResult(w io.Writer, rows [][]string) {
@@ -35,7 +37,7 @@ func ShowResult(w io.Writer, rows [][]string) {
 	}
 	table.SetAutoFormatHeaders(false)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	headers := []string{"Name", "Result", "Duration"}
+	headers := []string{"Name", "Result", "Duration", framework.CtxAverageResponseTime, framework.CtxMaxResponseTime, framework.CtxMinResponseTime}
 	table.SetHeader(headers)
 	table.SetAutoMergeCells(true)
 	table.SetAutoWrapText(true)
