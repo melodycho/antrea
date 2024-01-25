@@ -71,10 +71,14 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	res := "failed"
 	defer func() {
 		var rows [][]string
-		respTime := <-ch
-		rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime),
-			respTime.avg.String(), respTime.max.String(), respTime.min.String()))
-		table.ShowResult(os.Stdout, rows)
+		select {
+		case respTime := <-ch:
+			rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime),
+				respTime.avg.String(), respTime.max.String(), respTime.min.String()))
+			table.ShowResult(os.Stdout, rows)
+		case <-time.After(testData.checkTimeout):
+			klog.InfoS("wait timeout", "check time duration", testData.checkTimeout)
+		}
 	}()
 
 	done := make(chan interface{}, 1)
