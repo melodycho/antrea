@@ -29,11 +29,11 @@ import (
 	"antrea.io/antrea/test/performance/utils"
 )
 
-func ExecURL(clientPod *corev1.Pod, kClient kubernetes.Interface, peerIP string) *url.URL {
+func ExecURL(kClient kubernetes.Interface, clientPodNamespace, clientPodName, peerIP string) *url.URL {
 	return kClient.CoreV1().RESTClient().Post().
-		Namespace(clientPod.Namespace).
+		Namespace(clientPodNamespace).
 		Resource("pods").
-		Name(clientPod.Name).
+		Name(clientPodName).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Command: []string{"/bin/sh", "-c", fmt.Sprintf("nc -vz -w 1 %s 80", peerIP)},
@@ -44,8 +44,13 @@ func ExecURL(clientPod *corev1.Pod, kClient kubernetes.Interface, peerIP string)
 		}, scheme.ParameterCodec).URL()
 }
 
-func PingIP(ctx context.Context, kubeConfig *rest.Config, p kubernetes.Interface, pod *corev1.Pod, ip string) error {
-	executor, err := remotecommand.NewSPDYExecutor(kubeConfig, "POST", ExecURL(pod, p, ip))
+func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interface, podNs, podName, ip string) error {
+	// startTime := time.Now()
+	// defer func() {
+	// 	durationTime := time.Since(startTime)
+	// 	ctx = context.WithValue(ctx, "", "")
+	// }()
+	executor, err := remotecommand.NewSPDYExecutor(kubeConfig, "POST", ExecURL(kc, podNs, podName, ip))
 	if err != nil {
 		return fmt.Errorf("error when creating SPDY executor: %w", err)
 	}
@@ -56,7 +61,7 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, p kubernetes.Interface
 		if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
 			err := fmt.Errorf("executing commands on service client Pod error: %v", err)
 			// klog.ErrorS(err, "Check readiness of service", "ServiceName", svc.Name, "ClientPodName", clientPod.Name, "stdout", stdout.String(), "stderr", stderr.String())
-			return fmt.Errorf("ping ip %s error: %v, stdout:`%s`, stderr:`%s`, client pod: %s", ip, err, stdout.String(), stderr.String(), pod.Name)
+			return fmt.Errorf("ping ip %s error: %v, stdout:`%s`, stderr:`%s`, client pod: %s", ip, err, stdout.String(), stderr.String(), podName)
 		}
 		return nil
 	}); err != nil {
