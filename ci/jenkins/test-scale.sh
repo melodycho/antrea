@@ -127,15 +127,7 @@ function export_govc_env_var {
 
 function clean_antrea {
     echo "====== Cleanup Antrea Installation ======"
-    clean_ns "monitoring"
-    clean_ns "antrea-ipam-test"
-    clean_ns "antrea-test"
-    echo "====== Cleanup Conformance Namespaces ======"
-    clean_ns "net"
-    clean_ns "service"
-    clean_ns "x-"
-    clean_ns "y-"
-    clean_ns "z-"
+    clean_ns "antrea-scale-ns"
 
     # Delete antrea-prometheus first for k8s>=1.22 to avoid Pod stuck in Terminating state.
     kubectl delete -f ${WORKDIR}/antrea-prometheus.yml --ignore-not-found=true || true
@@ -192,10 +184,7 @@ function deliver_antrea_scale {
     make clean
     ${CLEAN_STALE_IMAGES}
     ${PRINT_DOCKER_STATUS}
-    if [[ ! "${TESTCASE}" =~ "e2e" && "${DOCKER_REGISTRY}" != "" ]]; then
-        docker pull "${DOCKER_REGISTRY}/antrea/sonobuoy-systemd-logs:v0.3"
-        docker tag "${DOCKER_REGISTRY}/antrea/sonobuoy-systemd-logs:v0.3" "sonobuoy/systemd-logs:v0.3"
-    fi
+
     chmod -R g-w build/images/ovs
     chmod -R g-w build/images/base
     DOCKER_REGISTRY="${DOCKER_REGISTRY}" ./hack/build-antrea-linux-all.sh --pull
@@ -316,11 +305,11 @@ export KUBECONFIG=${KUBECONFIG_PATH}
 
 source $WORKSPACE/ci/jenkins/utils.sh
 check_and_upgrade_golang
-#clean_tmp
-#
+clean_tmp
+
 #trap clean_antrea EXIT
 #deliver_antrea_scale
-#prepare_scale_simulator
+prepare_scale_simulator
 run_scale_test
 
 if [[ ${TEST_FAILURE} == true ]]; then
