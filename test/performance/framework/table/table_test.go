@@ -23,7 +23,7 @@ import (
 func TestTableName(t *testing.T) {
 	startTime := time.Now()
 	var rows [][]string
-	rows = append(rows, GenerateRow("BenchmarkInitXLargeScaleWithNetpolPerPod-2 123", "success", time.Since(startTime)))
-	rows = append(rows, GenerateRow("caseName1", "fail", time.Since(startTime)))
+	rows = append(rows, GenerateRow("BenchmarkInitXLargeScaleWithNetpolPerPod-2 123", "success", time.Since(startTime).String(), "", "", ""))
+	rows = append(rows, GenerateRow("caseName1", "fail", time.Since(startTime).String(), "", "", ""))
 	ShowResult(os.Stdout, rows)
 }

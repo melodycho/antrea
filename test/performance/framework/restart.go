@@ -17,6 +17,7 @@ package framework
 //goland:noinspection ALL
 import (
 	"context"
+	"time"
 
 	appv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,7 +34,7 @@ func init() {
 	RegisterFunc("RestartOVSContainer", RestartOVSContainer)
 }
 
-func ScaleRestartAgent(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
 	err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-agent"})
 	if err != nil {
@@ -56,7 +57,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan ResponseTime, data *ScaleDat
 	}, ctx.Done())
 }
 
-func RestartController(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
 	err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
 	if err != nil {
@@ -75,6 +76,6 @@ func RestartController(ctx context.Context, ch chan ResponseTime, data *ScaleDat
 	}, ctx.Done())
 }
 
-func RestartOVSContainer(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+func RestartOVSContainer(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
 	return ScaleRestartAgent(ctx, ch, data)
 }
