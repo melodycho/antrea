@@ -15,11 +15,9 @@
 package table
 
 import (
+	"github.com/olekukonko/tablewriter"
 	"io"
 	"strings"
-	"time"
-
-	"github.com/olekukonko/tablewriter"
 )
 
 const (
@@ -28,9 +26,9 @@ const (
 	CtxMinResponseTime     = "MinResponseTime"
 )
 
-func GenerateRow(name, result string, duration time.Duration, avgTime, maxTime, minTime string) []string {
+func GenerateRow(name, result string, duration, avgTime, maxTime, minTime string) []string {
 	name = strings.ReplaceAll(name, " ", "-")
-	return []string{name, result, duration.String(), avgTime, maxTime, minTime}
+	return []string{name, result, duration, avgTime, maxTime, minTime}
 }
 
 func ShowResult(w io.Writer, rows [][]string) {

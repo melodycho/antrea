@@ -32,7 +32,7 @@ func init() {
 	RegisterFunc("ScaleServiceDemo", ScaleServiceDemo)
 }
 
-func ScaleService(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
 	svcs, err := service.ScaleUp(ctx, data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6)
 	if err != nil {
 		return fmt.Errorf("scale up services error: %v", err)
@@ -49,7 +49,7 @@ func ScaleService(ctx context.Context, ch chan ResponseTime, data *ScaleData) er
 		k := int(utils.GenRandInt()) % len(data.clientPods)
 		clientPod := data.clientPods[k]
 		svc := svcs[i]
-		if err := PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, clientPod.Namespace, clientPod.Name, svc.IP); err != nil {
+		if err := utils.PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, clientPod.Namespace, clientPod.Name, svc.IP); err != nil {
 			klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 			return err
 		}
@@ -62,7 +62,8 @@ func ScaleService(ctx context.Context, ch chan ResponseTime, data *ScaleData) er
 	return nil
 }
 
-func ScaleServiceDemo(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+func ScaleServiceDemo(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
+	start := time.Now()
 	list, err := data.kubernetesClientSet.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
@@ -70,5 +71,8 @@ func ScaleServiceDemo(ctx context.Context, ch chan ResponseTime, data *ScaleData
 	klog.InfoS("List all test namespace", "namespacesNum", len(list.Items))
 	klog.V(2).InfoS("level 2 log")
 	klog.V(1).InfoS("level 1 log")
+	for i := 0; i < data.maxCheckNum; i++ {
+		ch <- time.Since(start)
+	}
 	return nil
 }

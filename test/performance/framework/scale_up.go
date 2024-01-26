@@ -142,6 +142,7 @@ type ScaleData struct {
 	namespaces          []string
 	Specification       *config.ScaleList
 	nodesNum            int
+	maxCheckNum         int
 	simulateNodesNum    int
 	podsNumPerNs        int
 	checkTimeout        time.Duration
