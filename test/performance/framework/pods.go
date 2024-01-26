@@ -98,7 +98,7 @@ func newWorkloadPod(podName, ns string, onRealNode bool, labelNum int) *corev1.P
 	return workloadPodTemplate(podName, ns, labels, onRealNode)
 }
 
-func ScaleUpWorkloadPods(ctx context.Context, ch chan ResponseTime, data *ScaleData) error {
+func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
 	if data.Specification.SkipDeployWorkload {
 		klog.V(2).InfoS("Skip creating workload Pods", "SkipDeployWorkload", data.Specification.SkipDeployWorkload)
 		return nil
@@ -152,6 +152,14 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan ResponseTime, data *ScaleD
 		if err != nil {
 			return err
 		}
+		go func() {
+			select {
+			case ch <- time.Since(start):
+				klog.InfoS("Successfully write in channel")
+			default:
+				klog.InfoS("Skipped writing to the channel. No receiver.")
+			}
+		}()
 	}
 	klog.InfoS("Scaled up Pods", "Duration", time.Since(start), "count", podNum*len(data.namespaces))
 	return nil

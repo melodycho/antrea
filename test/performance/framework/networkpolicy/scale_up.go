@@ -94,9 +94,10 @@ type NetworkPolicyInfo struct {
 	toIP             string
 }
 
-func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool) (nps []NetworkPolicyInfo, err error) {
+func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (nps []NetworkPolicyInfo, err error) {
 	// ScaleUp networkPolicies
 	start := time.Now()
+	checkCount := 0
 	for _, ns := range nss {
 		npsData, err := generateNetworkPolicies(ns, numPerNs)
 		if err != nil {
@@ -104,6 +105,11 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 		}
 		klog.InfoS("Scale up NetworkPolicies", "Num", len(npsData), "Namespace", ns)
 		for _, np := range npsData {
+			shouldCheck := true
+			if checkCount > maxCheckNum {
+				shouldCheck = false
+			}
+			var npInfo NetworkPolicyInfo
 			if err := utils.DefaultRetry(func() error {
 				newNP, err := cs.NetworkingV1().NetworkPolicies(ns).Create(ctx, np, metav1.CreateOptions{})
 				if err != nil {
@@ -113,37 +119,39 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 						return err
 					}
 				}
-				npInfo := NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
-
-				// // Check connection of Pods in NetworkPolicies, workload Pods
-				// fromPod, ip, err := SelectConnectPod(ctx, cs, newNP.Namespace, &npInfo)
-				// if err != nil {
-				// 	return err
-				// }
-				// npInfo.fromPodName = fromPod.Name
-				// npInfo.fromPodNamespace = fromPod.Namespace
-				// npInfo.toIP = ip
-				// go func() {
-				// 	if err := framework.PingIP(ctx, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip); err != nil {
-				// 		klog.ErrorS(err, "the connection should be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
-				// 	}
-				// }()
-				//
-				// // Check isolation of Pods in NetworkPolicies, client Pods to workload Pods
-				// fromPod, ip, err = SelectIsoPod(ctx, cs, np.Namespace, npInfo, clientPods)
-				// if err != nil {
-				// 	return err
-				// }
-				// go func() {
-				// 	if err := framework.PingIP(ctx, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip); err == nil {
-				// 		klog.ErrorS(err, "the connection should not be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
-				// 	}
-				// }()
-
-				nps = append(nps, npInfo)
+				npInfo = NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
 				return nil
 			}); err != nil {
 				return nil, err
+			}
+			if shouldCheck {
+				// Check connection of Pods in NetworkPolicies, workload Pods
+				fromPod, ip, err := SelectConnectPod(ctx, cs, npInfo.Namespace, &npInfo)
+				if err != nil || fromPod == nil || ip == "" {
+					continue
+				}
+				npInfo.fromPodName = fromPod.Name
+				npInfo.fromPodNamespace = fromPod.Namespace
+				npInfo.toIP = ip
+				nps = append(nps, npInfo)
+				checkCount++
+				go func() {
+					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, false); err != nil {
+						klog.ErrorS(err, "the connection should be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
+					}
+				}()
+
+				// Check isolation of Pods in NetworkPolicies, client Pods to workload Pods
+				fromPod, ip, err = SelectIsoPod(ctx, cs, np.Namespace, npInfo, clientPods)
+				if err != nil || fromPod == nil || ip == "" {
+					continue
+				}
+				checkCount++
+				go func() {
+					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, true); err != nil {
+						klog.ErrorS(err, "the connection should not be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
+					}
+				}()
 			}
 		}
 	}
