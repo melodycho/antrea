@@ -25,7 +25,7 @@ import (
 	"antrea.io/antrea/test/performance/framework/table"
 )
 
-type RunFunc func(ctx context.Context, ch chan time.Duration, data *ScaleData) error
+type RunFunc func(ctx context.Context, ch chan time.Duration, data *ScaleData) ScaleResult
 
 var cases = make(map[string]RunFunc, 128)
 
@@ -56,46 +56,22 @@ func (c *ScaleTestCase) Name() string {
 	return c.name
 }
 
-type ResponseTime struct {
-	max time.Duration
-	min time.Duration
-	avg time.Duration
+type ScaleResult struct {
+	err            error
+	actualCheckNum int
 }
 
 func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	ctx = wrapScaleTestName(ctx, c.name)
-	done := make(chan interface{}, 1)
+	done := make(chan ScaleResult, 1)
 
 	startTime := time.Now()
 	caseName := ctx.Value(CtxScaleCaseName).(string)
 	testData.maxCheckNum = testData.nodesNum * 2
 	ress := make(chan time.Duration, testData.maxCheckNum)
 	res := "failed"
+	actualCheckNum := 0
 	defer func() {
-		var rows [][]string
-
-		var total, minRes, maxRes, avg time.Duration
-		count := 0
-		for i := 0; i < testData.maxCheckNum; i++ {
-			res := <-ress
-			total += res
-			count++
-
-			if count == 1 || res < minRes {
-				minRes = res
-			}
-
-			if res > maxRes {
-				maxRes = res
-			}
-		}
-
-		avg = total / time.Duration(count)
-
-		rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime).String(),
-			avg.String(), maxRes.String(), minRes.String()))
-		table.ShowResult(os.Stdout, rows)
-
 		close(ress)
 		close(done)
 	}()
@@ -107,13 +83,41 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-done:
+	case scaleRes := <-done:
+		err := scaleRes.err
 		if err != nil {
 			return err.(error)
 		}
+		actualCheckNum = scaleRes.actualCheckNum
 		res = "success"
-		return nil
+		// return nil
 	}
+
+	var rows [][]string
+	var total, minRes, maxRes, avg time.Duration
+	count := 0
+	for i := 0; i < actualCheckNum; i++ {
+		res := <-ress
+		total += res
+		count++
+
+		if count == 1 || res < minRes {
+			minRes = res
+		}
+
+		if res > maxRes {
+			maxRes = res
+		}
+	}
+
+	if count != 0 {
+		avg = total / time.Duration(count)
+	}
+
+	rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime).String(),
+		avg.String(), maxRes.String(), minRes.String()))
+	table.ShowResult(os.Stdout, rows)
+	return nil
 }
 
 type CtxScaleCaseNameType string

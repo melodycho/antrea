@@ -17,6 +17,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"k8s.io/klog/v2"
 	"time"
 
 	"antrea.io/antrea/test/performance/framework/networkpolicy"
@@ -26,11 +27,24 @@ func init() {
 	RegisterFunc("ScaleNetworkPolicy", ScaleNetworkPolicy)
 }
 
-func ScaleNetworkPolicy(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
-	_, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
+func ScaleNetworkPolicy(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
+	defer func() {
+		for {
+			if len(ch) == res.actualCheckNum {
+				break
+			}
+			klog.InfoS("Waiting the check goroutine finish")
+			time.Sleep(time.Second)
+		}
+		if err := networkpolicy.ScaleDown(ctx, data.namespaces, data.kubernetesClientSet); err != nil {
+			klog.ErrorS(err, "Scale down NetworkPolicies failed")
+		}
+	}()
+	checkCount, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
 		data.Specification.NpNumPerNs, data.clientPods, data.Specification.IPv6, data.maxCheckNum, ch)
 	if err != nil {
-		return fmt.Errorf("scale up NetworkPolicies error: %v", err)
+		res.err = fmt.Errorf("scale up NetworkPolicies error: %v", err)
+		return
 	}
 
 	// maxNPCheckedCount := data.nodesNum
@@ -62,8 +76,6 @@ func ScaleNetworkPolicy(ctx context.Context, ch chan time.Duration, data *ScaleD
 	// 	}
 	// 	klog.InfoS("Checked networkPolicy", "Name", np.Name, "Namespace", np.Namespace, "count", i, "maxNum", maxNPCheckedCount)
 	// }
-	if err := networkpolicy.ScaleDown(ctx, data.namespaces, data.kubernetesClientSet); err != nil {
-		return err
-	}
-	return nil
+	res.actualCheckNum = checkCount
+	return
 }
