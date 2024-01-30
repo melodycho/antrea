@@ -17,7 +17,6 @@ package networkpolicy
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/rest"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/performance/utils"
@@ -94,14 +94,14 @@ type NetworkPolicyInfo struct {
 	toIP             string
 }
 
-func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (nps []NetworkPolicyInfo, err error) {
+func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (actualCheckNUm int, err error) {
 	// ScaleUp networkPolicies
 	start := time.Now()
 	checkCount := 0
 	for _, ns := range nss {
 		npsData, err := generateNetworkPolicies(ns, numPerNs)
 		if err != nil {
-			return nil, fmt.Errorf("error when generating network policies: %w", err)
+			return 0, fmt.Errorf("error when generating network policies: %w", err)
 		}
 		klog.InfoS("Scale up NetworkPolicies", "Num", len(npsData), "Namespace", ns)
 		for _, np := range npsData {
@@ -122,8 +122,10 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				npInfo = NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
 				return nil
 			}); err != nil {
-				return nil, err
+				return 0, err
 			}
+
+			// sample num
 			if shouldCheck {
 				// Check connection of Pods in NetworkPolicies, workload Pods
 				fromPod, ip, err := SelectConnectPod(ctx, cs, npInfo.Namespace, &npInfo)
@@ -133,7 +135,6 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				npInfo.fromPodName = fromPod.Name
 				npInfo.fromPodNamespace = fromPod.Namespace
 				npInfo.toIP = ip
-				nps = append(nps, npInfo)
 				checkCount++
 				go func() {
 					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, false); err != nil {
@@ -155,7 +156,7 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 			}
 		}
 	}
-	klog.InfoS("Scale up NetworkPolicies", "Duration", time.Since(start), "count", len(nps))
+	klog.InfoS("Scale up NetworkPolicies", "Duration", time.Since(start), "actualCheckNum", checkCount)
 	return
 }
 

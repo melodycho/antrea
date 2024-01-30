@@ -17,18 +17,17 @@ package framework
 import (
 	"context"
 	"fmt"
+	"k8s.io/klog/v2"
 	"time"
 
+	"antrea.io/antrea/test/performance/config"
+	"antrea.io/antrea/test/performance/utils"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/klog/v2"
-
-	"antrea.io/antrea/test/performance/config"
-	"antrea.io/antrea/test/performance/utils"
 )
 
 func init() {
@@ -98,14 +97,19 @@ func newWorkloadPod(podName, ns string, onRealNode bool, labelNum int) *corev1.P
 	return workloadPodTemplate(podName, ns, labels, onRealNode)
 }
 
-func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
+func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
+	var err error
+	defer func() {
+		res.err = err
+	}()
 	if data.Specification.SkipDeployWorkload {
 		klog.V(2).InfoS("Skip creating workload Pods", "SkipDeployWorkload", data.Specification.SkipDeployWorkload)
-		return nil
+		return
 	}
 	// Creating workload Pods
 	start := time.Now()
 	podNum := data.Specification.PodsNumPerNs
+	count := 0
 	for _, ns := range data.namespaces {
 		gErr, _ := errgroup.WithContext(context.Background())
 		for i := 0; i < podNum; i++ {
@@ -126,12 +130,12 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 			})
 		}
 		klog.V(2).InfoS("Create workload Pods", "PodNum", podNum, "Namespace", ns)
-		if err := gErr.Wait(); err != nil {
-			return err
+		if err = gErr.Wait(); err != nil {
+			return
 		}
 
 		// Waiting scale workload Pods to be ready
-		err := wait.PollUntil(config.WaitInterval, func() (bool, error) {
+		err = wait.PollUntil(config.WaitInterval, func() (bool, error) {
 			podsResult, err := data.kubernetesClientSet.
 				CoreV1().Pods(ns).
 				List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", AppLabelKey, AppLabelValue)})
@@ -150,17 +154,23 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 			return false, nil
 		}, ctx.Done())
 		if err != nil {
-			return err
+			return
 		}
-		go func() {
-			select {
-			case ch <- time.Since(start):
-				klog.InfoS("Successfully write in channel")
-			default:
-				klog.InfoS("Skipped writing to the channel. No receiver.")
-			}
-		}()
+
+		if count < data.maxCheckNum {
+			ch <- time.Since(start)
+			count++
+		}
+		// go func() {
+		// 	select {
+		// 	case ch <- time.Since(start):
+		// 		klog.InfoS("Successfully write in channel")
+		// 	default:
+		// 		klog.InfoS("Skipped writing to the channel. No receiver.")
+		// 	}
+		// }()
 	}
+	res.actualCheckNum = count
 	klog.InfoS("Scaled up Pods", "Duration", time.Since(start), "count", podNum*len(data.namespaces))
-	return nil
+	return res
 }
