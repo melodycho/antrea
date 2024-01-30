@@ -34,13 +34,17 @@ func init() {
 	RegisterFunc("RestartOVSContainer", RestartOVSContainer)
 }
 
-func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
-	err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
+func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
+	var err error
+	defer func() {
+		res.err = err
+	}()
+	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-agent"})
 	if err != nil {
-		return err
+		return
 	}
-	return wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
+	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var ds *appv1.DaemonSet
 		if err := utils.DefaultRetry(func() error {
 			var err error
@@ -55,15 +59,20 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			"NumberAvailable", ds.Status.NumberAvailable)
 		return ds.Status.DesiredNumberScheduled == ds.Status.NumberAvailable, nil
 	}, ctx.Done())
+	return
 }
 
-func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
-	err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
+func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
+	var err error
+	defer func() {
+		res.err = err
+	}()
+	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
 	if err != nil {
-		return err
+		return
 	}
-	return wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
+	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var dp *appv1.Deployment
 		if err := utils.DefaultRetry(func() error {
 			var err error
@@ -72,10 +81,11 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		}); err != nil {
 			return false, err
 		}
-		return dp.Status.UnavailableReplicas == 0, nil
+		return dp.Status.ObservedGeneration == dp.Generation && dp.Status.ReadyReplicas == *dp.Spec.Replicas, nil
 	}, ctx.Done())
+	return
 }
 
-func RestartOVSContainer(ctx context.Context, ch chan time.Duration, data *ScaleData) error {
+func RestartOVSContainer(ctx context.Context, ch chan time.Duration, data *ScaleData) ScaleResult {
 	return ScaleRestartAgent(ctx, ch, data)
 }
