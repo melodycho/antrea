@@ -36,7 +36,9 @@ func init() {
 
 func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
+	start := time.Now()
 	defer func() {
+		ch <- time.Since(start)
 		res.err = err
 	}()
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
@@ -59,12 +61,15 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			"NumberAvailable", ds.Status.NumberAvailable)
 		return ds.Status.DesiredNumberScheduled == ds.Status.NumberAvailable, nil
 	}, ctx.Done())
+	res.actualCheckNum = 1
 	return
 }
 
 func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
+	start := time.Now()
 	defer func() {
+		ch <- time.Since(start)
 		res.err = err
 	}()
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
@@ -83,6 +88,7 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		}
 		return dp.Status.ObservedGeneration == dp.Generation && dp.Status.ReadyReplicas == *dp.Spec.Replicas, nil
 	}, ctx.Done())
+	res.actualCheckNum = 1
 	return
 }
 

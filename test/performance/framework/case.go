@@ -67,7 +67,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 
 	startTime := time.Now()
 	caseName := ctx.Value(CtxScaleCaseName).(string)
-	testData.maxCheckNum = testData.nodesNum * 2
+	testData.maxCheckNum = testData.nodesNum * 10
 	ress := make(chan time.Duration, testData.maxCheckNum)
 	res := "failed"
 	actualCheckNum := 0
