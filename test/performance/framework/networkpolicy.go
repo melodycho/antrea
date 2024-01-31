@@ -28,24 +28,25 @@ func init() {
 }
 
 func ScaleNetworkPolicy(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
-	defer func() {
-		for {
-			if len(ch) == res.actualCheckNum {
-				break
-			}
-			klog.InfoS("Waiting the check goroutine finish")
-			time.Sleep(time.Second)
-		}
-		if err := networkpolicy.ScaleDown(ctx, data.namespaces, data.kubernetesClientSet); err != nil {
-			klog.ErrorS(err, "Scale down NetworkPolicies failed")
-		}
-	}()
 	checkCount, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
 		data.Specification.NpNumPerNs, data.clientPods, data.Specification.IPv6, data.maxCheckNum, ch)
 	if err != nil {
 		res.err = fmt.Errorf("scale up NetworkPolicies error: %v", err)
 		return
 	}
+
+	defer func() {
+		for {
+			if len(ch) >= res.actualCheckNum {
+				break
+			}
+			klog.InfoS("Waiting the check goroutine finish", "actualCheckNum", res.actualCheckNum, "channel length", len(ch))
+			time.Sleep(time.Second)
+		}
+		if err := networkpolicy.ScaleDown(ctx, data.namespaces, data.kubernetesClientSet); err != nil {
+			klog.ErrorS(err, "Scale down NetworkPolicies failed")
+		}
+	}()
 
 	// maxNPCheckedCount := data.nodesNum
 	//
