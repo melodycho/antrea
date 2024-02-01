@@ -41,6 +41,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		ch <- time.Since(start)
 		res.err = err
 	}()
+	res.scaleNum = data.nodesNum
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-agent"})
 	if err != nil {
@@ -68,10 +69,12 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
 	start := time.Now()
+	res.scaleNum = 1
 	defer func() {
 		ch <- time.Since(start)
 		res.err = err
 	}()
+
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
 	if err != nil {

@@ -91,13 +91,14 @@ type NetworkPolicyInfo struct {
 	Spec      netv1.NetworkPolicySpec
 }
 
-func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (actualCheckNum int, err error) {
+func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (actualCheckNum, scale int, err error) {
 	// ScaleUp networkPolicies
 	start := time.Now()
+	scale = len(nss) * numPerNs
 	for _, ns := range nss {
 		npsData, err := generateNetworkPolicies(ns, numPerNs)
 		if err != nil {
-			return 0, fmt.Errorf("error when generating network policies: %w", err)
+			return 0, 0, fmt.Errorf("error when generating network policies: %w", err)
 		}
 		klog.InfoS("Scale up NetworkPolicies", "Num", len(npsData), "Namespace", ns)
 		for _, np := range npsData {
@@ -114,7 +115,7 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				npInfo = NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
 				return nil
 			}); err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 
 			if actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {

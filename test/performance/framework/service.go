@@ -35,12 +35,12 @@ func init() {
 func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
 	maxSvcCheckedCount := data.nodesNum
-	// actualCheckNum := 0
 	svcs, actualCheckNum, err := service.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, data.clientPods)
 	if err != nil {
 		err = fmt.Errorf("scale up services error: %v", err)
 		return
 	}
+	res.scaleNum = len(svcs)
 
 	defer func() {
 		res.err = err
