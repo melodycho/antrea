@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/rest"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,7 +60,7 @@ type ServiceInfo struct {
 	NameSpace string
 }
 
-func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool) (svcs []ServiceInfo, err error) {
+func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool, maxCheckNum int, ch chan time.Duration, clientPods []corev1.Pod) (svcs []ServiceInfo, actualCheckNum int, err error) {
 	start := time.Now()
 	for _, ns := range nss {
 		klog.InfoS("Scale up Services", "Namespace", ns)
@@ -84,9 +85,24 @@ func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerN
 				}
 				klog.InfoS("Create Service", "Name", newSvc.Name, "ClusterIP", newSvc.Spec.ClusterIP, "Namespace", ns)
 				svcs = append(svcs, ServiceInfo{Name: newSvc.Name, IP: newSvc.Spec.ClusterIP, NameSpace: newSvc.Namespace})
+
+				ip := newSvc.Spec.ClusterIP
+
+				if actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {
+					k := int(utils.GenRandInt()) % len(clientPods)
+					clientPod := clientPods[k]
+					klog.V(2).InfoS("Check service", "svc", svc, "Pod", clientPod.Name)
+					actualCheckNum++
+					go func() {
+						if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, clientPod.Namespace, clientPod.Name, ip, false); err != nil {
+							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
+						}
+					}()
+				}
+
 				return nil
 			}); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			time.Sleep(time.Duration(utils.GenRandInt()%2000) * time.Millisecond)
 		}
