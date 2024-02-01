@@ -28,12 +28,13 @@ func init() {
 }
 
 func ScaleNetworkPolicy(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
-	checkCount, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
+	checkCount, scaleNum, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
 		data.Specification.NpNumPerNs, data.clientPods, data.Specification.IPv6, data.maxCheckNum, ch)
 	if err != nil {
 		res.err = fmt.Errorf("scale up NetworkPolicies error: %v", err)
 		return
 	}
+	res.scaleNum = scaleNum
 
 	defer func() {
 		for {

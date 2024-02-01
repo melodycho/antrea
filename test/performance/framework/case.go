@@ -60,6 +60,7 @@ func (c *ScaleTestCase) Name() string {
 type ScaleResult struct {
 	err            error
 	actualCheckNum int
+	scaleNum       int
 }
 
 func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
@@ -72,6 +73,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	ress := make(chan time.Duration, testData.maxCheckNum)
 	res := "failed"
 	actualCheckNum := 0
+	scaleNum := 0
 	defer func() {
 		close(ress)
 		close(done)
@@ -90,6 +92,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 			return err.(error)
 		}
 		actualCheckNum = scaleRes.actualCheckNum
+		scaleNum = scaleRes.scaleNum
 		res = "success"
 	}
 
@@ -115,7 +118,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	}
 
 	rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime).String(),
-		avg.String(), maxRes.String(), minRes.String(), strconv.Itoa(actualCheckNum)))
+		avg.String(), maxRes.String(), minRes.String(), strconv.Itoa(actualCheckNum), strconv.Itoa(scaleNum)))
 	table.ShowResult(os.Stdout, rows)
 	return nil
 }

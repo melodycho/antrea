@@ -109,6 +109,7 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 	// Creating workload Pods
 	start := time.Now()
 	podNum := data.Specification.PodsNumPerNs
+	res.scaleNum = len(data.namespaces) * podNum
 	count := 0
 	for _, ns := range data.namespaces {
 		gErr, _ := errgroup.WithContext(context.Background())
