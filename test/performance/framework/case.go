@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -90,7 +91,6 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 		}
 		actualCheckNum = scaleRes.actualCheckNum
 		res = "success"
-		// return nil
 	}
 
 	var rows [][]string
@@ -115,7 +115,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	}
 
 	rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime).String(),
-		avg.String(), maxRes.String(), minRes.String()))
+		avg.String(), maxRes.String(), minRes.String(), strconv.Itoa(actualCheckNum)))
 	table.ShowResult(os.Stdout, rows)
 	return nil
 }

@@ -86,12 +86,9 @@ func generateNetworkPolicies(ns string, num int) ([]*netv1.NetworkPolicy, error)
 }
 
 type NetworkPolicyInfo struct {
-	Name             string
-	Namespace        string
-	Spec             netv1.NetworkPolicySpec
-	fromPodName      string
-	fromPodNamespace string
-	toIP             string
+	Name      string
+	Namespace string
+	Spec      netv1.NetworkPolicySpec
 }
 
 func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (actualCheckNum int, err error) {
@@ -120,18 +117,12 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				return 0, err
 			}
 
-			if actualCheckNum >= maxCheckNum || actualCheckNum >= cap(ch) {
-				continue
-			}
-			// Check connection of Pods in NetworkPolicies, workload Pods
-			fromPod, ip, err := SelectConnectPod(ctx, cs, npInfo.Namespace, &npInfo)
-			if err != nil || fromPod == nil || ip == "" {
-				continue
-			}
-			npInfo.fromPodName = fromPod.Name
-			npInfo.fromPodNamespace = fromPod.Namespace
-			npInfo.toIP = ip
 			if actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {
+				// Check connection of Pods in NetworkPolicies, workload Pods
+				fromPod, ip, err := SelectConnectPod(ctx, cs, npInfo.Namespace, &npInfo)
+				if err != nil || fromPod == nil || ip == "" {
+					continue
+				}
 				actualCheckNum++
 				go func() {
 					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, false); err != nil {
@@ -140,12 +131,12 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				}()
 			}
 
-			// Check isolation of Pods in NetworkPolicies, client Pods to workload Pods
-			fromPod, ip, err = SelectIsoPod(ctx, cs, np.Namespace, npInfo, clientPods)
-			if err != nil || fromPod == nil || ip == "" {
-				continue
-			}
 			if actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {
+				// Check isolation of Pods in NetworkPolicies, client Pods to workload Pods
+				fromPod, ip, err := SelectIsoPod(ctx, cs, np.Namespace, npInfo, clientPods)
+				if err != nil || fromPod == nil || ip == "" {
+					continue
+				}
 				actualCheckNum++
 				go func() {
 					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, true); err != nil {
