@@ -17,6 +17,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/antctl/runtime"
@@ -44,6 +46,7 @@ func init() {
 var (
 	ScaleTestNamespacePrefix = "antrea-scale-ns"
 	ScaleTestNamespaceBase   = "antrea-scale-ns-xxxx"
+	ClientPodsNamespace      = ScaleTestNamespacePrefix + "-scale-client"
 )
 
 const (
@@ -56,9 +59,13 @@ const (
 	SimulatorTaintKey   = "simulator"
 	SimulatorTaintValue = "true"
 
-	ScaleClientContainerName   = "antrea-scale-test-client"
-	ScaleClientPodTemplateName = "antrea-scale-test-client"
-	ScaleTestClientDaemonSet   = "antrea-scale-test-client-daemonset"
+	ScaleClientContainerName          = "antrea-scale-test-client"
+	ScaleAgentProbeContainerName      = "antrea-scale-test-agent-probe"
+	ScaleControllerProbeContainerName = "antrea-scale-test-controller-probe"
+	ScaleClientPodTemplateName        = "antrea-scale-test-client"
+	ScaleTestClientDaemonSet          = "antrea-scale-test-client-daemonset"
+	ScaleTestControllerProbeDaemonSet = "antrea-scale-test-controller-probe-daemonset"
+	ScaleTestAgentProbeDaemonSet      = "antrea-scale-test-agent-probe-daemonset"
 )
 
 var (
@@ -146,6 +153,49 @@ type ScaleData struct {
 	simulateNodesNum    int
 	podsNumPerNs        int
 	checkTimeout        time.Duration
+}
+
+func patchClientPod(ctx context.Context, kClient kubernetes.Interface, ns string, probes []string) error {
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		daemonSet, err := kClient.AppsV1().DaemonSets(ns).Get(context.TODO(), ScaleTestClientDaemonSet, metav1.GetOptions{})
+		if err != nil {
+			klog.ErrorS(err, "Error getting DaemonSet", "Name", ScaleTestClientDaemonSet)
+			return err
+		}
+		var containers []corev1.Container
+		for _, probe := range probes {
+			l := strings.Split(probe, ":")
+			server, port := l[0], l[1]
+			containers = append(containers, corev1.Container{
+				Name:            ScaleAgentProbeContainerName,
+				Image:           "busybox",
+				Command:         []string{"/bin/sh", "-c", fmt.Sprintf("server=%s; output_file=\"ping_log.txt\"; if [ ! -e \"$output_file\" ]; then touch \"$output_file\"; fi; last_status=\"unknown\"; last_change_time=$(date +%s); while true; do status=$(nc -vz -w 1 \"$server\" %s > /dev/null && echo \"up\" || echo \"down\"); current_time=$(date +%s); time_diff=$((current_time - last_change_time)); if [ \"$status\" != \"$last_status\" ]; then echo \"Status changed from $last_status to $status after ${time_diff} seconds\"; echo \"Status changed from $last_status to $status after ${time_diff} seconds\" >> \"$output_file\"; last_change_time=$current_time; last_status=$status; fi; sleep 0.3; done\n", server, port)},
+				ImagePullPolicy: corev1.PullIfNotPresent,
+			})
+		}
+		daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, containers...)
+
+		_, err = kClient.AppsV1().DaemonSets(ns).Update(context.TODO(), daemonSet, metav1.UpdateOptions{})
+		return err
+	})
+
+	if err != nil {
+		klog.ErrorS(err, "Error updating DaemonSet", "Name", ScaleTestClientDaemonSet)
+		return err
+	}
+
+	klog.InfoS("DaemonSet updated successfully!", "Name", ScaleTestClientDaemonSet)
+
+	if err := wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
+		ds, err := kClient.AppsV1().DaemonSets(ns).Get(ctx, ScaleTestClientDaemonSet, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		return ds.Status.DesiredNumberScheduled == ds.Status.NumberReady, nil
+	}, ctx.Done()); err != nil {
+		return fmt.Errorf("error when waiting scale test clients to be ready: %w", err)
+	}
+	return nil
 }
 
 func createTestPodClients(ctx context.Context, kClient kubernetes.Interface, ns string) error {
@@ -274,8 +324,6 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	td.simulateNodesNum = simulateNodesNum
 	td.checkTimeout = time.Duration(scaleConfig.CheckTimeout) * time.Minute
 
-	clientPodsNamespace := ScaleTestNamespacePrefix + "-scale-client"
-
 	expectNsNum := td.Specification.NamespaceNum
 	klog.Infof("Preflight checks and clean up")
 	if !scaleConfig.SkipDeployWorkload {
@@ -290,7 +338,7 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 		td.namespaces = nss
 
 		klog.Infof("Creating the scale test client DaemonSet")
-		if err := createTestPodClients(ctx, kClient, clientPodsNamespace); err != nil {
+		if err := createTestPodClients(ctx, kClient, ClientPodsNamespace); err != nil {
 			return nil, err
 		}
 
@@ -303,7 +351,7 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	klog.Infof("Checking scale test client DaemonSet")
 	expectClientNum := td.nodesNum - td.simulateNodesNum
 	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
-		podList, err := kClient.CoreV1().Pods(clientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: ScaleClientPodTemplateName})
+		podList, err := kClient.CoreV1().Pods(ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: ScaleClientPodTemplateName})
 		if err != nil {
 			return false, fmt.Errorf("error when getting scale test client pods: %w", err)
 		}
