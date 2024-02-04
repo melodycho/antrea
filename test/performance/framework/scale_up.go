@@ -128,6 +128,39 @@ var (
 		Spec: corev1.PodSpec{
 			Affinity:    &RealNodeAffinity,
 			Tolerations: []corev1.Toleration{MasterToleration},
+			//   volumes:
+			//  - name: host-info
+			//    downwardAPI:
+			//      items:
+			//      - path: "hostname"
+			//        fieldRef:
+			//          fieldPath: spec.nodeName
+			//      - path: "ip"
+			//        fieldRef:
+			//          fieldPath: status.hostIP
+			Volumes: []corev1.Volume{
+				{
+					Name: "host-info",
+					VolumeSource: corev1.VolumeSource{
+						DownwardAPI: &corev1.DownwardAPIVolumeSource{
+							Items: []corev1.DownwardAPIVolumeFile{
+								{
+									Path: "hostname",
+									FieldRef: &corev1.ObjectFieldSelector{
+										FieldPath: "spec.nodeName",
+									},
+								},
+								{
+									Path: "ip",
+									FieldRef: &corev1.ObjectFieldSelector{
+										FieldPath: "status.hostIP",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			Containers: []corev1.Container{
 				{
 					Name:            ScaleClientContainerName,
@@ -155,7 +188,7 @@ type ScaleData struct {
 	checkTimeout        time.Duration
 }
 
-func patchClientPod(ctx context.Context, kClient kubernetes.Interface, ns string, probes []string) error {
+func updateClientPod(ctx context.Context, kClient kubernetes.Interface, ns string, probes []string, containerName string) error {
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		daemonSet, err := kClient.AppsV1().DaemonSets(ns).Get(context.TODO(), ScaleTestClientDaemonSet, metav1.GetOptions{})
 		if err != nil {
@@ -166,11 +199,24 @@ func patchClientPod(ctx context.Context, kClient kubernetes.Interface, ns string
 		for _, probe := range probes {
 			l := strings.Split(probe, ":")
 			server, port := l[0], l[1]
+			if server == "" {
+				server = "$NODE_IP"
+			}
 			containers = append(containers, corev1.Container{
-				Name:            ScaleAgentProbeContainerName,
+				Name:            containerName,
 				Image:           "busybox",
-				Command:         []string{"/bin/sh", "-c", fmt.Sprintf("server=%s; output_file=\"ping_log.txt\"; if [ ! -e \"$output_file\" ]; then touch \"$output_file\"; fi; last_status=\"unknown\"; last_change_time=$(date +%s); while true; do status=$(nc -vz -w 1 \"$server\" %s > /dev/null && echo \"up\" || echo \"down\"); current_time=$(date +%s); time_diff=$((current_time - last_change_time)); if [ \"$status\" != \"$last_status\" ]; then echo \"Status changed from $last_status to $status after ${time_diff} seconds\"; echo \"Status changed from $last_status to $status after ${time_diff} seconds\" >> \"$output_file\"; last_change_time=$current_time; last_status=$status; fi; sleep 0.3; done\n", server, port)},
+				Command:         []string{"/bin/sh", "-c", fmt.Sprintf("server=%s; output_file=\"ping_log.txt\"; if [ ! -e \"$output_file\" ]; then touch \"$output_file\"; fi; last_status=\"unknown\"; last_change_time=$(date +%%s); while true; do status=$(nc -vz -w 1 \"$server\" %s > /dev/null && echo \"up\" || echo \"down\"); current_time=$(date +%%s); time_diff=$((current_time - last_change_time)); if [ \"$status\" != \"$last_status\" ]; then echo \"Status changed from $last_status to $status after ${time_diff} seconds\"; echo \"Status changed from $last_status to $status after ${time_diff} seconds\" >> \"$output_file\"; last_change_time=$current_time; last_status=$status; fi; sleep 0.3; done\n", server, port)},
 				ImagePullPolicy: corev1.PullIfNotPresent,
+				Env: []corev1.EnvVar{
+					{
+						Name: "NODE_IP",
+						ValueFrom: &corev1.EnvVarSource{
+							FieldRef: &corev1.ObjectFieldSelector{
+								FieldPath: "status.hostIP",
+							},
+						},
+					},
+				},
 			})
 		}
 		daemonSet.Spec.Template.Spec.Containers = append(daemonSet.Spec.Template.Spec.Containers, containers...)

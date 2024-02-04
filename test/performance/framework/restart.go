@@ -19,7 +19,6 @@ import (
 	antreaapis "antrea.io/antrea/pkg/apis"
 	"context"
 	"fmt"
-	v1 "k8s.io/api/core/v1"
 	"time"
 
 	appv1 "k8s.io/api/apps/v1"
@@ -45,6 +44,14 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		res.err = err
 	}()
 	res.scaleNum = data.nodesNum
+
+	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaAgentAPIPort)
+
+	err = updateClientPod(ctx, data.kubernetesClientSet, ClientPodsNamespace, []string{prober}, ScaleAgentProbeContainerName)
+	if err != nil {
+		return
+	}
+
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-agent"})
 	if err != nil {
@@ -79,19 +86,20 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		res.err = err
 	}()
 
-	var controllerPods *v1.PodList
-	controllerPods, err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
-	if err != nil {
-		return
-	}
-	if len(controllerPods.Items) < 1 {
-		err = fmt.Errorf("no Antrea Controller Pods")
-		return
-	}
+	// var controllerPods *v1.PodList
+	// controllerPods, err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
+	// if err != nil {
+	// 	return
+	// }
+	// if len(controllerPods.Items) < 1 {
+	// 	err = fmt.Errorf("no Antrea Controller Pods")
+	// 	return
+	// }
+	// controllerPods.Items[0].Status.PodIP
 
-	prober := fmt.Sprintf("%s:%d", controllerPods.Items[0].Status.PodIP, antreaapis.AntreaControllerAPIPort)
+	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
-	err = patchClientPod(ctx, data.kubernetesClientSet, ClientPodsNamespace, []string{prober})
+	err = updateClientPod(ctx, data.kubernetesClientSet, ClientPodsNamespace, []string{prober}, ScaleControllerProbeContainerName)
 	if err != nil {
 		return
 	}
