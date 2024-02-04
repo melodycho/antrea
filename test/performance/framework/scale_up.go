@@ -128,39 +128,6 @@ var (
 		Spec: corev1.PodSpec{
 			Affinity:    &RealNodeAffinity,
 			Tolerations: []corev1.Toleration{MasterToleration},
-			//   volumes:
-			//  - name: host-info
-			//    downwardAPI:
-			//      items:
-			//      - path: "hostname"
-			//        fieldRef:
-			//          fieldPath: spec.nodeName
-			//      - path: "ip"
-			//        fieldRef:
-			//          fieldPath: status.hostIP
-			Volumes: []corev1.Volume{
-				{
-					Name: "host-info",
-					VolumeSource: corev1.VolumeSource{
-						DownwardAPI: &corev1.DownwardAPIVolumeSource{
-							Items: []corev1.DownwardAPIVolumeFile{
-								{
-									Path: "hostname",
-									FieldRef: &corev1.ObjectFieldSelector{
-										FieldPath: "spec.nodeName",
-									},
-								},
-								{
-									Path: "ip",
-									FieldRef: &corev1.ObjectFieldSelector{
-										FieldPath: "status.hostIP",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
 			Containers: []corev1.Container{
 				{
 					Name:            ScaleClientContainerName,
