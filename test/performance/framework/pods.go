@@ -43,7 +43,7 @@ const (
 
 var (
 	workloadPodContainer = corev1.Container{
-		Name:            "busybox",
+		Name:            client_pod.ScaleClientContainerName,
 		Image:           "busybox",
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"httpd", "-f"},
