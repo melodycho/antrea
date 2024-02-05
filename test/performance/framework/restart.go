@@ -48,10 +48,11 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaAgentAPIPort)
 
-	err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleAgentProbeContainerName)
+	clientPods, err := client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleAgentProbeContainerName)
 	if err != nil {
 		return
 	}
+	data.clientPods = clientPods
 
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-agent"})
@@ -100,10 +101,11 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
-	err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleControllerProbeContainerName)
+	clientPods, err := client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleControllerProbeContainerName)
 	if err != nil {
 		return
 	}
+	data.clientPods = clientPods
 
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
