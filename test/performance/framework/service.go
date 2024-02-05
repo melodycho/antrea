@@ -16,6 +16,7 @@ package framework
 
 //goland:noinspection ALL
 import (
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"context"
 	"fmt"
 	"time"
@@ -34,8 +35,15 @@ func init() {
 
 func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
+
+	clientPods, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
+	if err != nil {
+		res.err = fmt.Errorf("list client Pod error: %+v", err)
+		return
+	}
+
 	maxSvcCheckedCount := data.nodesNum
-	svcs, actualCheckNum, err := service.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, data.clientPods)
+	svcs, actualCheckNum, err := service.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, clientPods.Items)
 	if err != nil {
 		err = fmt.Errorf("scale up services error: %v", err)
 		return

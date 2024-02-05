@@ -112,14 +112,14 @@ var (
 type ScaleData struct {
 	kubernetesClientSet kubernetes.Interface
 	kubeconfig          *rest.Config
-	clientPods          []corev1.Pod
-	namespaces          []string
-	Specification       *config.ScaleList
-	nodesNum            int
-	maxCheckNum         int
-	simulateNodesNum    int
-	podsNumPerNs        int
-	checkTimeout        time.Duration
+	// clientPods          []corev1.Pod
+	namespaces       []string
+	Specification    *config.ScaleList
+	nodesNum         int
+	maxCheckNum      int
+	simulateNodesNum int
+	podsNumPerNs     int
+	checkTimeout     time.Duration
 }
 
 func createTestPodClients(ctx context.Context, kClient kubernetes.Interface, ns string) error {
@@ -279,7 +279,6 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 			return false, fmt.Errorf("error when getting scale test client pods: %w", err)
 		}
 		if len(podList.Items) == expectClientNum {
-			td.clientPods = podList.Items
 			return true, nil
 		}
 		klog.InfoS("Waiting test client DaemonSet Pods ready", "podsNum", len(podList.Items),
