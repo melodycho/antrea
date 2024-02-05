@@ -18,16 +18,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"net/url"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+
+	"antrea.io/antrea/test/performance/framework/client_pod"
 )
 
 const (
@@ -38,15 +40,15 @@ const (
 func ExecURL(kClient kubernetes.Interface, clientPodNamespace, clientPodName, peerIP string) *url.URL {
 	return kClient.CoreV1().RESTClient().Post().
 		Namespace(clientPodNamespace).
-		Resource("pods").
-		Name(clientPodName).
+		Resource("pods").Name(clientPodName).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Command: []string{"/bin/sh", "-c", fmt.Sprintf("nc -vz -w 1 %s 80", peerIP)},
-			Stdin:   false,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     false,
+			Command:   []string{"/bin/sh", "-c", fmt.Sprintf("nc -vz -w 1 %s 80", peerIP)},
+			Container: client_pod.ScaleClientContainerName,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
 		}, scheme.ParameterCodec).URL()
 }
 
