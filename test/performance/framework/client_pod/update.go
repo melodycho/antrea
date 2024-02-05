@@ -15,12 +15,18 @@ import (
 	"antrea.io/antrea/test/performance/config"
 )
 
-func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonSetName string, probes []string, containerName string) error {
-	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonSetName string, probes []string, containerName string) (clientPods []corev1.Pod, err error) {
+	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		daemonSet, err := kClient.AppsV1().DaemonSets(ns).Get(context.TODO(), clientDaemonSetName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Error getting DaemonSet", "Name", clientDaemonSetName)
 			return err
+		}
+		for _, existedContainer := range daemonSet.Spec.Template.Spec.Containers {
+			if existedContainer.Name == containerName {
+				klog.InfoS("Container already existed", "ContainerName", containerName, "DaemonSet", clientDaemonSetName)
+				return nil
+			}
 		}
 		var containers []corev1.Container
 		for _, probe := range probes {
@@ -54,7 +60,7 @@ func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonS
 
 	if err != nil {
 		klog.ErrorS(err, "Error updating DaemonSet", "Name", clientDaemonSetName)
-		return err
+		return
 	}
 
 	klog.InfoS("DaemonSet updated successfully!", "Name", clientDaemonSetName)
@@ -64,9 +70,17 @@ func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonS
 		if err != nil {
 			return false, nil
 		}
-		return ds.Status.DesiredNumberScheduled == ds.Status.NumberReady, nil
+		if ds.Status.DesiredNumberScheduled != ds.Status.NumberReady {
+			return false, nil
+		}
+		podList, err := kClient.CoreV1().Pods(ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: ScaleClientPodTemplateName})
+		if err != nil {
+			return false, fmt.Errorf("error when getting scale test client pods: %w", err)
+		}
+		clientPods = podList.Items
+		return true, nil
 	}, ctx.Done()); err != nil {
-		return fmt.Errorf("error when waiting scale test clients to be ready: %w", err)
+		return nil, fmt.Errorf("error when waiting scale test clients to be ready: %w", err)
 	}
-	return nil
+	return
 }
