@@ -17,17 +17,19 @@ package framework
 import (
 	"context"
 	"fmt"
-	"k8s.io/klog/v2"
 	"time"
 
-	"antrea.io/antrea/test/performance/config"
-	"antrea.io/antrea/test/performance/utils"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
+
+	"antrea.io/antrea/test/performance/config"
+	"antrea.io/antrea/test/performance/framework/client_pod"
+	"antrea.io/antrea/test/performance/utils"
 )
 
 func init() {
@@ -87,8 +89,8 @@ func workloadPodTemplate(podName, ns string, labels map[string]string, onRealNod
 
 func newWorkloadPod(podName, ns string, onRealNode bool, labelNum int) *corev1.Pod {
 	labels := map[string]string{
-		AppLabelKey: AppLabelValue,
-		"namespace": ns,
+		client_pod.AppLabelKey: client_pod.AppLabelValue,
+		"namespace":            ns,
 		fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
 	}
 	if onRealNode {
@@ -139,7 +141,7 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 		err = wait.PollUntil(config.WaitInterval, func() (bool, error) {
 			podsResult, err := data.kubernetesClientSet.
 				CoreV1().Pods(ns).
-				List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", AppLabelKey, AppLabelValue)})
+				List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=%s", client_pod.AppLabelKey, client_pod.AppLabelValue)})
 			if err != nil {
 				klog.ErrorS(err, "Error when listing Pods")
 			} else {

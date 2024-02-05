@@ -16,7 +16,6 @@ package framework
 
 //goland:noinspection ALL
 import (
-	antreaapis "antrea.io/antrea/pkg/apis"
 	"context"
 	"fmt"
 	"time"
@@ -26,7 +25,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
+	antreaapis "antrea.io/antrea/pkg/apis"
 	"antrea.io/antrea/test/performance/config"
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"antrea.io/antrea/test/performance/utils"
 )
 
@@ -47,7 +48,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaAgentAPIPort)
 
-	err = updateClientPod(ctx, data.kubernetesClientSet, ClientPodsNamespace, []string{prober}, ScaleAgentProbeContainerName)
+	err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleAgentProbeContainerName)
 	if err != nil {
 		return
 	}
@@ -99,7 +100,7 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
-	err = updateClientPod(ctx, data.kubernetesClientSet, ClientPodsNamespace, []string{prober}, ScaleControllerProbeContainerName)
+	err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleControllerProbeContainerName)
 	if err != nil {
 		return
 	}
