@@ -15,9 +15,13 @@
 package networkpolicy
 
 import (
+	"antrea.io/antrea/test/performance/framework/client_pod"
+	"antrea.io/antrea/test/performance/framework/workload_pod"
 	"context"
 	"fmt"
 	"time"
+
+	"k8s.io/klog/v2"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -27,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/performance/utils"
 )
@@ -139,6 +142,12 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 					continue
 				}
 				actualCheckNum++
+				if fromPod.Namespace != client_pod.ClientPodsNamespace {
+					if err = workload_pod.Update(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", ip, 80)}, workload_pod.ScaleClientPodProbeContainerName); err != nil {
+						klog.ErrorS(err, "Update test Pod failed")
+					}
+					klog.InfoS("Update test Pod to check NetworkPolicy")
+				}
 				go func() {
 					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, true); err != nil {
 						klog.ErrorS(err, "the connection should not be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)

@@ -17,8 +17,9 @@ package framework
 import (
 	"context"
 	"fmt"
-	"k8s.io/klog/v2"
 	"time"
+
+	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/performance/framework/networkpolicy"
 )
