@@ -15,8 +15,10 @@
 package framework
 
 import (
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"context"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -29,8 +31,13 @@ func init() {
 }
 
 func ScaleNetworkPolicy(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
+	clientPods, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
+	if err != nil {
+		res.err = fmt.Errorf("list client Pod error: %+v", err)
+		return
+	}
 	checkCount, scaleNum, err := networkpolicy.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces,
-		data.Specification.NpNumPerNs, data.clientPods, data.Specification.IPv6, data.maxCheckNum, ch)
+		data.Specification.NpNumPerNs, clientPods.Items, data.Specification.IPv6, data.maxCheckNum, ch)
 	if err != nil {
 		res.err = fmt.Errorf("scale up NetworkPolicies error: %v", err)
 		return
