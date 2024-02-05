@@ -51,22 +51,26 @@ func ExecURL(kClient kubernetes.Interface, clientPodNamespace, clientPodName, pe
 }
 
 func WaitUntil(ctx context.Context, ch chan time.Duration, kubeConfig *rest.Config, kc kubernetes.Interface, podNs, podName, ip string, expectErr bool) error {
+	var err error
 	startTime := time.Now()
 	defer func() {
-		select {
-		case ch <- time.Since(startTime):
-			klog.InfoS("Successfully write in channel")
-		default:
-			klog.InfoS("Skipped writing to the channel. No receiver.")
+		if err == nil {
+			select {
+			case ch <- time.Since(startTime):
+				klog.InfoS("Successfully write in channel")
+			default:
+				klog.InfoS("Skipped writing to the channel. No receiver.")
+			}
 		}
 	}()
-	return wait.Poll(defaultInterval, defaultTimeout, func() (bool, error) {
+	err = wait.Poll(defaultInterval, defaultTimeout, func() (bool, error) {
 		err := PingIP(ctx, kubeConfig, kc, podNs, podName, ip)
 		if (err != nil && !expectErr) || (err == nil && expectErr) {
 			return false, fmt.Errorf("error when getting expected condition: %+v", err)
 		}
 		return true, nil
 	})
+	return err
 }
 
 func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interface, podNs, podName, ip string) error {
