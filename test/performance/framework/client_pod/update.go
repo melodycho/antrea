@@ -11,11 +11,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
+	"k8s.io/kubectl/pkg/util/podutils"
 
 	"antrea.io/antrea/test/performance/config"
 )
 
-func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonSetName string, probes []string, containerName string) (clientPods []corev1.Pod, err error) {
+func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonSetName string, probes []string, containerName string, desiredNum int) (clientPods []corev1.Pod, err error) {
 	err = retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		daemonSet, err := kClient.AppsV1().DaemonSets(ns).Get(context.TODO(), clientDaemonSetName, metav1.GetOptions{})
 		if err != nil {
@@ -77,7 +78,17 @@ func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonS
 		if err != nil {
 			return false, fmt.Errorf("error when getting scale test client pods: %w", err)
 		}
+		if len(podList.Items) != desiredNum {
+			return false, nil
+		}
+		for i := range podList.Items {
+			pod := podList.Items[i]
+			if pod.DeletionTimestamp != nil || !podutils.IsPodReady(&pod) {
+				return false, nil
+			}
+		}
 		clientPods = podList.Items
+		klog.InfoS("All Pods in DaemonSet updated successfully!", "Name", clientDaemonSetName, "PodNum", len(podList.Items))
 		return true, nil
 	}, ctx.Done()); err != nil {
 		return nil, fmt.Errorf("error when waiting scale test clients to be ready: %w", err)

@@ -48,7 +48,8 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaAgentAPIPort)
 
-	_, err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleAgentProbeContainerName)
+	expectPodNum := data.nodesNum - data.simulateNodesNum
+	_, err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleAgentProbeContainerName, expectPodNum)
 	if err != nil {
 		return
 	}
@@ -100,7 +101,8 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
-	_, err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleControllerProbeContainerName)
+	expectPodNum := data.nodesNum - data.simulateNodesNum
+	_, err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleControllerProbeContainerName, expectPodNum)
 	if err != nil {
 		return
 	}
