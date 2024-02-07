@@ -153,8 +153,8 @@ spec:
           port: 80
 ```
 
-也可以控制节点到节点或者IP段的网络流量，以下是一个阻止带有标签`kubernetes.io/hostname: k8s-node-control-plane`的节点上的流量发往
-带有标签`kubernetes.io/hostname: k8s-node-worker-1`和某些IP块的节点的示例：
+也可以控制节点到节点或者IP段的网络流量，以下示例是阻止带有标签`kubernetes.io/hostname: k8s-node-control-plane`的节点上的流量发往
+带有标签`kubernetes.io/hostname: k8s-node-worker-1`和某些IP块的节点：
 
 ```yaml
 apiVersion: crd.antrea.io/v1beta1
