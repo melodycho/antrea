@@ -10,7 +10,8 @@
 
 第四，Antrea现在支持第7层网络流导出，为用户提供了对其应用程序流量模式的更全面观测能力。
 
-最后，Antrea在多个维度上提高了可用性和兼容性：为Agent和Controller提供了单独的容器镜像，以最小化镜像大小并加快部署新Antrea版本的速度；Flexible IPAM现在支持多播流量；Antrea可以用作Talos集群的CNI；在AKS中已验证encap模式。
+最后，Antrea在多个维度上提高了可用性和兼容性：为Agent和Controller提供了单独的容器镜像，以最小化镜像大小并加快部署新Antrea版本的速度；Flexible IPAM现在支持多播流量；
+同时Antrea可以用作Talos集群的CNI；在AKS中也已验证encap模式，欢迎用户在AWS体验尝试。
 
 ## 1.15.0
 
@@ -26,7 +27,7 @@
 
 1. 必须设置gateway和prefixLength。当目的地址和Egress IP不在同一子网中时， Antrea将通过指定的网关路由Egress流量，否则直接路由到目的地。
 2. 作为可选项，如果底层网络需要，可以指定`vlan`字段。
-一旦设置，Antrea将标记离开Egress节点的Egress流量，添加指定的VLAN ID。相应地，
+一旦设置该值，Antrea将标记离开Egress节点的Egress流量，添加指定的VLAN ID。相应地，
 Egress节点收到的目的地址为EgressIP的回复流量也应被标记为指定的VLAN ID。
 
 使用非默认子网的ExternalIPPool的示例如下：
@@ -60,20 +61,22 @@ spec:
 2. 在集群中安装Antrea。
 3. 部署Antrea迁移工具。
 
-在Antrea启动并运行后，可以通过以下命令部署Antrea迁移工具antrea-migrator。
-该迁移工具作为DaemonSet在集群中运行，将原地重启集群中所有非hostNetwork的Pods，
-并执行必要的网络资源清理。
-
+在Antrea启动并运行后，可以通过以下命令部署Antrea迁移工具antrea-migrator：
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/antrea-io/antrea/main/build/yamls/antrea-migrator.yml
 ```
+
+该迁移工具作为DaemonSet在集群中运行，将原地重启集群中所有非hostNetwork的Pods，
+并执行必要的网络资源清理。
+
+
 
 有关此工具的更多信息，请参阅 [此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/migrate-to-antrea.md) 。
 
 - 在Antrea中添加L7网络流导出支持，可导出具有L7协议信息的网络流。([#5218](https://github.com/antrea-io/antrea/pull/5218), [@tushartathgur])
 
 
-要导出Pod或Namespace的第7层流量，用户可以为Pods或Namespaces添加注释`visibility.antrea.io/l7-export`，
+要导出Pod或Namespace的第7层流量，用户可以为Pods或Namespaces添加相应注释，键值为`visibility.antrea.io/l7-export`，
 并将值设置为指示流量流向的值，可以是`ingress`、`egress`或`both`。
 
 例如，要在default Namespace中启用`ingress`方向上的L7流量导出，可以使用：
@@ -85,7 +88,7 @@ kubectl annotate pod test-pod visibility.antrea.io/l7-export=ingress
 或配置的IPFix收集器。
 
 1. `appProtocolName`字段用于指示应用层协议名称（例如http），如果未导出应用层数据，则为空。
-2. `httpVals`存储了一个序列化的JSON字典，其中每个HTTP请求都映射到唯一的事务ID。
+2. `httpVals`存储了一个序列化的JSON字典，其中每个HTTP请求都映射到唯一的ID。
 此格式使我们能够将与同一连接相关的所有HTTP流量分组到相同的导出记录中。
 
 例如：
@@ -96,7 +99,7 @@ kubectl annotate pod test-pod visibility.antrea.io/l7-export=ingress
 
 - 新增NodeNetworkPolicy功能，允许用户将ClusterNetworkPolicy应用于Kubernetes节点。([#5658](https://github.com/antrea-io/antrea/pull/5658) [#5716](https://github.com/antrea-io/antrea/pull/5716), [@hongliangl] [@Atish-iaf])
 
-节点网络策略在 v1.15 中作为 alpha 功能引入，并默认禁用。在 antrea-config ConfigMap 的 antrea-agent.conf 中，必须启用一个名为 NodeNetworkPolicy 的功能开关。
+节点网络策略在v1.15中作为alpha功能引入，并默认禁用。可以在antrea-config ConfigMap的antrea-agent.conf中，启用名为NodeNetworkPolicy的功能开关即可。
 
 ```yaml
 apiVersion: v1
@@ -119,7 +122,7 @@ helm install antrea antrea/antrea --namespace kube-system --set featureGates.Nod
 节点网络策略是Antrea ClusterNetworkPolicy（ACNP）的扩展。通过在NetworkPolicy spec的`appliedTo`中指定一个`nodeSelector`字段，
 ACNP将应用于`nodeSelector`所选的Kubernetes节点。
 
-例如，如下ClusterNetworkPolicy可以控制节点到Pod的流量，在集群中定义ClusterNetworkPolicy并apply，
+例如，如下ClusterNetworkPolicy可以控制节点到Pod的流量，在集群中定义该ClusterNetworkPolicy并apply，
 标有`app=client`的Pod发往标有`kubernetes.io/hostname: k8s-node-control-plane`的节点的入口流量将被阻止：
 
 ```yaml
