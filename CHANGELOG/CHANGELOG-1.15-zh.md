@@ -1,11 +1,15 @@
 # Release 1.15
 
-我们很高兴宣布Antrea v1.15的发布，本次版本更新带来了强大的功能和改进！
+我们很高兴宣布Antrea v1.15的发布，本次版本更新带来了很多强大的功能和改进！
 
 首先，引入了NodeNetworkPolicy功能，允许用户将ClusterNetworkPolicy应用于Kubernetes节点，为Pod和节点之间提供一致的安全姿态。
+
 其次，Egress新增支持使用与默认节点子网不同的子网中的IP，特别适用于用户希望使用VLAN将出口流量与集群内流量分开的场景。
+
 第三，Antrea新增CNI迁移工具，简化了从选定的CNI过渡到Antrea的流程，确保用户在其已建立的集群上采用Antrea丰富功能时获得顺畅的体验。
+
 第四，Antrea现在支持第7层网络流导出，为用户提供了对其应用程序流量模式的更全面观测能力。
+
 最后，Antrea在多个维度上提高了可用性和兼容性：为Agent和Controller提供了单独的容器镜像，以最小总体镜像大小并加快部署新Antrea版本的速度；Flexible IPAM现在支持多播流量；Antrea可以用作Talos集群的CNI；在AKS中已验证encap模式。
 
 ## 1.15.0
@@ -13,17 +17,172 @@
 ### 新增功能
 
 - Egress功能现在支持使用与默认节点子网不同的子网中的IP。([#5799](https://github.com/antrea-io/antrea/pull/5799), [@tnqn])
-    * 有关此功能的更多信息，请参阅[此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/egress.md)。
+
+默认情况下，假定从ExternalIPPool分配的IP与节点IP在同一子网中。从Antrea v1.15开始，
+可以从与节点IP不同的子网中分配IP。
+
+为此新增了`subnetInfo`字段,可以在该字段中定义特定ExternalIPPool的子网属性。
+注意在使用不同子网时：
+
+1. 必须设置gateway和prefixLength。当目的地址和Egress IP不在同一子网中时， Antrea将通过指定的网关路由Egress流量，否则直接路由到目的地。
+2. 作为可选项，如果底层网络需要，可以指定`vlan`字段。
+一旦设置，Antrea将标记离开Egress节点的Egress流量，添加指定的VLAN ID。相应地，
+当到达Egress节点目的地址为EgressIP的回复流量也被标记为指定的VLAN ID。
+
+使用非默认子网的ExternalIPPool的示例如下：
+
+```yaml
+apiVersion: crd.antrea.io/v1beta1
+kind: ExternalIPPool
+metadata:
+  name: prod-external-ip-pool
+spec:
+  ipRanges:
+  - start: 10.10.0.2
+    end: 10.10.0.10
+  subnetInfo:
+    gateway: 10.10.0.1
+    prefixLength: 24
+    vlan: 10
+  nodeSelector:
+    matchLabels:
+      network-role: egress-gateway
+```
+
+有关此功能的更多信息，请参阅 [此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/egress.md) 。
+
+
 - 添加迁移工具，以支持从其他CNI迁移到Antrea。([#5677](https://github.com/antrea-io/antrea/pull/5677), [@hjiajing])
-    * 有关此工具的更多信息，请参阅[此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/migrate-to-antrea.md)。
+
+迁移过程分为三个步骤：
+
+1. 清理旧的CNI。
+2. 在集群中安装Antrea。
+3. 部署Antrea迁移工具。
+
+在Antrea启动并运行后，可以通过以下命令部署Antrea迁移工具antrea-migrator。
+该迁移工具作为DaemonSet在集群中运行，将原地重启集群中所有非hostNetwork的Pods，
+并执行必要的网络资源清理。
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/antrea-io/antrea/main/build/yamls/antrea-migrator.yml
+```
+
+有关此工具的更多信息，请参阅 [此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/migrate-to-antrea.md) 。
+
 - 在Antrea中添加L7网络流导出支持，可导出具有L7协议信息的网络流。([#5218](https://github.com/antrea-io/antrea/pull/5218), [@tushartathgur])
-    * 有关此功能的更多信息，请参阅[此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/network-flow-visibility.md)。
+
+
+要导出Pod或Namespace的第7层流量，用户可以为Pods或Namespaces添加注释`visibility.antrea.io/l7-export`，
+并将值设置为指示流量流向的值，可以是`ingress`、`egress`或`both`。
+
+例如，要在default Namespace中启用`ingress`方向上的L7流量导出，可以使用：
+```bash
+kubectl annotate pod test-pod visibility.antrea.io/l7-export=ingress
+```
+
+根据注释，流量导出器将使用字段`appProtocolName`和`httpVals`将L7流量数据导出到Flow Aggregator
+或配置的IPFix收集器。
+
+1. `appProtocolName`字段用于指示应用层协议名称（例如http），如果未导出应用层数据，则为空。
+2. `httpVals`存储了一个序列化的JSON字典，其中每个HTTP请求都映射到唯一的事务ID。
+此格式使我们能够将与同一连接相关的所有HTTP流量分组到相同的导出记录中。
+
+例如：
+`"{\"0\":{\"hostname\":\"10.10.0.1\",\"url\":\"/public/\",\"http_user_agent\":\"curl/7.74.0\",\"http_content_type\":\"text/html\",\"http_method\":\"GET\",\"protocol\":\"HTTP/1.1\",\"status\":200,\"length\":153}}"`
+
+目前该特性只支持Linux节点，且只支持`HTTP1.1`协议流量的导出。
+有关此功能的更多信息，请参阅[此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/network-flow-visibility.md)。
+
 - 新增支持节点NetworkPolicy:NodeNetworkPolicy，允许用户将ClusterNetworkPolicy应用于Kubernetes节点。([#5658](https://github.com/antrea-io/antrea/pull/5658) [#5716](https://github.com/antrea-io/antrea/pull/5716), [@hongliangl] [@Atish-iaf])
-    * 有关此功能的更多信息，请参阅[此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/antrea-node-network-policy.md)。
-- 为Antrea Multicast功能添加灵活的IPAM支持。([#4922](https://github.com/antrea-io/antrea/pull/4922), [@ceclinux])
+
+节点网络策略在 v1.15 中作为 alpha 功能引入，并默认禁用。在 antrea-config ConfigMap 的 antrea-agent.conf 中，必须启用一个名为 NodeNetworkPolicy 的功能开关。
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: antrea-config
+  namespace: kube-system
+data:
+  antrea-agent.conf: |
+    featureGates:
+      NodeNetworkPolicy: true
+```
+
+也可以使用以下helm安装命令来启用功能开关：
+
+```bash
+helm install antrea antrea/antrea --namespace kube-system --set featureGates.NodeNetworkPolicy=true
+```
+
+节点网络策略是Antrea ClusterNetworkPolicy（ACNP）的扩展。通过在NetworkPolicy spec的`appliedTo`中指定一个`nodeSelector`字段，
+ACNP将应用于`nodeSelector`所选的Kubernetes节点。
+
+例如，如下ClusterNetworkPolicy可以控制节点到Pod的流量，在集群中定义ClusterNetworkPolicy并apply，
+标有`app=client`的Pod发往标有`kubernetes.io/hostname: k8s-node-control-plane`的节点的入口流量将被阻止：
+
+```yaml
+apiVersion: crd.antrea.io/v1beta1
+kind: ClusterNetworkPolicy
+metadata:
+  name: ingress-drop-pod-to-node
+spec:
+  priority: 5
+  tier: application
+  appliedTo:
+    - nodeSelector:
+        matchLabels:
+          kubernetes.io/hostname: k8s-node-control-plane
+  ingress:
+    - name: drop-80
+      action: Drop
+      from:
+        - podSelector:
+            matchLabels:
+              app: client
+      ports:
+        - protocol: TCP
+          port: 80
+```
+
+也可以控制节点到节点或者IP段的网络流量，以下是一个阻止带有标签`kubernetes.io/hostname: k8s-node-control-plane`的节点上的流量发往
+带有标签`kubernetes.io/hostname: k8s-node-worker-1`和某些IP块的节点的示例：
+
+```yaml
+apiVersion: crd.antrea.io/v1beta1
+kind: ClusterNetworkPolicy
+metadata:
+  name: egress-drop-node-to-node
+spec:
+  priority: 5
+  tier: application
+  appliedTo:
+    - nodeSelector:
+        matchLabels:
+          kubernetes.io/hostname: k8s-node-control-plane
+  egress:
+    - name: drop-22
+      action: Drop
+      to:
+        - nodeSelector:
+            matchLabels:
+              kubernetes.io/hostname: k8s-node-worker-1
+        - ipBlock:
+            cidr: 192.168.77.0/24
+        - ipBlock:
+            cidr: 10.10.0.0/24
+      ports:
+        - protocol: TCP
+          port: 22
+```
+
+有关此功能的更多信息，请参阅 [此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/antrea-node-network-policy.md) 。
+
+- 为Antrea Multicast功能添加Flexible IPAM支持。([#4922](https://github.com/antrea-io/antrea/pull/4922), [@ceclinux])
 - 支持Talos集群运行Antrea作为CNI，并将Talos添加到K8s安装程序文档中。([#5718](https://github.com/antrea-io/antrea/pull/5718) [#5766](https://github.com/antrea-io/antrea/pull/5766), [@antoninbas])
 - 在NetworkAttachmentDefinition的网络配置不包括IPAM配置时，支持辅助网络。([#5762](https://github.com/antrea-io/antrea/pull/5762), [@jianjuns])
-- 在AKS中添加Antrea以encap模式安装的说明。([#5901](https://github.com/antrea-io/antrea/pull/5901), [@antoninbas])
+- 添加在AKS中以encap模式安装Antrea的说明。([#5901](https://github.com/antrea-io/antrea/pull/5901), [@antoninbas])
 
 ### 其他变更
 
