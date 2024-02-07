@@ -8,7 +8,7 @@
 
 第三，Antrea新增CNI迁移工具，简化了从特定的CNI迁移到Antrea的流程，确保用户在其已建立的集群上能够顺畅切换来获得Antrea的丰富功能。
 
-第四，Antrea现在支持第7层网络流导出，为用户提供了对其应用程序流量模式的更全面观测能力。
+第四，Antrea现在支持第7层网络流导出，为用户提供了针对应用程序流量模式更全面观测能力。
 
 最后，Antrea在多个维度上提高了可用性和兼容性：为Agent和Controller提供了单独的容器镜像，以最小化镜像大小并加快部署新Antrea版本的速度；Flexible IPAM现在支持多播流量；
 同时Antrea可以用作Talos集群的CNI；在AKS中也已验证encap模式，欢迎用户在AWS体验尝试。
@@ -73,18 +73,18 @@ kubectl apply -f https://raw.githubusercontent.com/antrea-io/antrea/main/build/y
 
 有关此工具的更多信息，请参阅 [此文档](https://github.com/antrea-io/antrea/blob/release-1.15/docs/migrate-to-antrea.md) 。
 
-- 在Antrea中添加L7网络流导出支持，可导出具有L7协议信息的网络流。([#5218](https://github.com/antrea-io/antrea/pull/5218), [@tushartathgur])
+- 在Antrea中添加L7网络流量导出支持，可导出具有L7协议信息的网络流量。([#5218](https://github.com/antrea-io/antrea/pull/5218), [@tushartathgur])
 
 
 要导出Pod或Namespace的第7层流量，用户可以为Pods或Namespaces添加相应注释，键值为`visibility.antrea.io/l7-export`，
-并将值设置为指示流量流向的值，可以是`ingress`、`egress`或`both`。
+并将其值设置为流量方向，例如`ingress`、`egress`或`both`。
 
-例如，要在default Namespace中启用`ingress`方向上的L7流量导出，可以使用：
+例如，要在default Namespace中启用`ingress`方向上的7层流量导出，可以使用：
 ```bash
 kubectl annotate pod test-pod visibility.antrea.io/l7-export=ingress
 ```
 
-根据注释，流量导出器将使用字段`appProtocolName`和`httpVals`将L7流量数据导出到Flow Aggregator
+根据注释，流量导出器将使用字段`appProtocolName`和`httpVals`将7层流量数据导出到Flow Aggregator
 或配置的IPFix收集器。
 
 1. `appProtocolName`字段用于指示应用层协议名称（例如http），如果未导出应用层数据，则为空。
@@ -119,8 +119,8 @@ data:
 helm install antrea antrea/antrea --namespace kube-system --set featureGates.NodeNetworkPolicy=true
 ```
 
-节点网络策略是Antrea ClusterNetworkPolicy（ACNP）的扩展。通过在NetworkPolicy spec的`appliedTo`中指定一个`nodeSelector`字段，
-ACNP将应用于`nodeSelector`所选的Kubernetes节点。
+NodeNetworkPolicy是Antrea ClusterNetworkPolicy（ACNP）的扩展。通过指定NetworkPolicy spec的`appliedTo`为`nodeSelector`字段，
+将ACNP应用于`nodeSelector`所选的Kubernetes节点。
 
 例如，如下ClusterNetworkPolicy可以控制节点到Pod的流量，在集群中定义该ClusterNetworkPolicy并apply，
 标有`app=client`的Pod发往标有`kubernetes.io/hostname: k8s-node-control-plane`的节点的入口流量将被阻止：
@@ -208,7 +208,7 @@ spec:
 ### 修复
 
 - 修复WireGuard加密模式和GRE隧道模式的MTU配置不正确的问题。([#5880](https://github.com/antrea-io/antrea/pull/5880) [#5926](https://github.com/antrea-io/antrea/pull/5926), [@hjiajing] [@tnqn])
-- 在TrafficControl控制器中优先处理L7 NetworkPolicy流，以避免潜在问题即带有将流量重定向到同一Pod的TrafficControl CR可能会绕过L7引擎的情况。([#5768](https://github.com/antrea-io/antrea/pull/5768), [@hongliangl])
+- 在TrafficControl控制器中优先处理L7 NetworkPolicy流，避免Pod同时也被TrafficControl CR影响，而可能会绕过L7引擎的情况。([#5768](https://github.com/antrea-io/antrea/pull/5768), [@hongliangl])
 - 在释放Pod IP之前删除OVS端口和流规则。([#5788](https://github.com/antrea-io/antrea/pull/5788), [@tnqn])
 - 将NetworkPolicy存储在文件系统中作为备用数据源，以便让antre-agent在启动时无法连接到antrea-controller时回退到使用文件。([#5739](https://github.com/antrea-io/antrea/pull/5739), [@tnqn])
 - 确保应用初始NetworkPolicies后才启动Pod网络转发，避免在antrea-agent重新启动时Pod的出入口流量绕过NetworkPolicy。([#5777](https://github.com/antrea-io/antrea/pull/5777), [@tnqn])
