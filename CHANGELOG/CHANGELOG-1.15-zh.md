@@ -129,7 +129,7 @@ NodeNetworkPolicy是Antrea ClusterNetworkPolicy（ACNP）的扩展。通过指�
 apiVersion: crd.antrea.io/v1beta1
 kind: ClusterNetworkPolicy
 metadata:
-  name: ingress-drop-pod-to-node
+  name: restrict-http-to-node
 spec:
   priority: 5
   tier: application
@@ -138,12 +138,16 @@ spec:
         matchLabels:
           kubernetes.io/hostname: k8s-node-control-plane
   ingress:
-    - name: drop-80
-      action: Drop
+    - name: allow-cidr
+      action: Allow
       from:
-        - podSelector:
-            matchLabels:
-              app: client
+        - ipBlock:
+            cidr: 10.10.0.0/16
+      ports:
+        - protocol: TCP
+          port: 80
+    - name: drop-other
+      action: Drop
       ports:
         - protocol: TCP
           port: 80
@@ -184,13 +188,13 @@ spec:
 
 - 为Antrea Multicast功能添加Flexible IPAM支持。([#4922](https://github.com/antrea-io/antrea/pull/4922), [@ceclinux])
 - 支持Talos集群运行Antrea作为CNI，并将Talos添加到K8s安装程序文档中。([#5718](https://github.com/antrea-io/antrea/pull/5718) [#5766](https://github.com/antrea-io/antrea/pull/5766), [@antoninbas])
-- 在NetworkAttachmentDefinition的网络配置不包括IPAM配置时，支持辅助网络。([#5762](https://github.com/antrea-io/antrea/pull/5762), [@jianjuns])
+- 在NetworkAttachmentDefinition的网络配置不包括IPAM配置时，支持Secondary Network。([#5762](https://github.com/antrea-io/antrea/pull/5762), [@jianjuns])
 - 添加在AKS中以encap模式安装Antrea的说明。([#5901](https://github.com/antrea-io/antrea/pull/5901), [@antoninbas])
 
 ### 其他变更
 
-- 将辅助网络Pod控制器更改为订阅CNIServer事件，以支持bridging和VLAN网络。([#5767](https://github.com/antrea-io/antrea/pull/5767), [@jianjuns])
-- 为辅助网络支持使用Antrea IPAM。([#5427](https://github.com/antrea-io/antrea/pull/5427), [@jianjuns])
+- 将Secondary NetworkPod控制器更改为订阅CNIServer事件，以支持bridging和VLAN网络。([#5767](https://github.com/antrea-io/antrea/pull/5767), [@jianjuns])
+- 为Secondary Network支持使用Antrea IPAM。([#5427](https://github.com/antrea-io/antrea/pull/5427), [@jianjuns])
 - 为antrea-agent和antrea-controller创建不同的image镜像，以减小总的镜像大小，加快antrea-agent和antrea-controller的启动速度。([#5856](https://github.com/antrea-io/antrea/pull/5856) [#5902](https://github.com/antrea-io/antrea/pull/5902) [#5903](https://github.com/antrea-io/antrea/pull/5903), [@jainpulkit22])
 - 在使用Wireguard加密模式时不创建隧道接口（antrea-tun0）。([#5885](https://github.com/antrea-io/antrea/pull/5885) [#5909](https://github.com/antrea-io/antrea/pull/5909), [@antoninbas])
 - 在Egress IP分配更改时记录事件，以便更好地进行故障排除。([#5765](https://github.com/antrea-io/antrea/pull/5765), [@jainpulkit22])
