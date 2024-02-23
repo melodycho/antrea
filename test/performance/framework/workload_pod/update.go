@@ -68,8 +68,15 @@ func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podNam
 		if err != nil {
 			return fmt.Errorf("error waiting for Pod termination: %v", err)
 		}
+		newPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+			},
+			Spec: pod.Spec,
+		}
 
-		_, err = kClient.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+		_, err = kClient.CoreV1().Pods(namespace).Create(ctx, newPod, metav1.CreateOptions{})
 		return err
 	})
 	if err != nil {

@@ -117,13 +117,6 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 	// }
 
 	for i, ns := range nss {
-		var podList *corev1.PodList
-		podList, err = cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return
-		}
-
-		fromPod := podList.Items[0]
 
 		klog.InfoS("Scale up Services", "Namespace", ns)
 		for _, svc := range generateService(ns, numPerNs) {
@@ -132,6 +125,13 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				svc.Spec.IPFamilies = []corev1.IPFamily{ipFamily}
 			}
 			if err := utils.DefaultRetry(func() error {
+				var podList *corev1.PodList
+				podList, err = cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+				if err != nil {
+					return fmt.Errorf("list test Pod error: %+v", err)
+				}
+
+				fromPod := podList.Items[0]
 
 				clusterIP := startSvcCIDR + strconv.Itoa(i+1)
 				if err = workload_pod.Update(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleClientPodProbeContainerName); err != nil {
@@ -141,6 +141,7 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 
 				var newSvc *corev1.Service
 				var err error
+				svc.Spec.ClusterIP = clusterIP
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 				if err != nil {
 					if errors.IsAlreadyExists(err) {
