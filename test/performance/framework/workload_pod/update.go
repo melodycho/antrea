@@ -55,7 +55,21 @@ func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podNam
 		pod.Spec.Containers = append(pod.Spec.Containers, containers...)
 		expectContainerNum = len(pod.Spec.Containers)
 
-		_, err = kClient.CoreV1().Pods(namespace).Update(ctx, pod, metav1.UpdateOptions{})
+		err = kClient.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+		if err != nil {
+			return err
+		}
+
+		err = wait.PollImmediate(2*time.Second, 60*time.Second, func() (done bool, err error) {
+			_, err = kClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+			return err != nil, nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("error waiting for Pod termination: %v", err)
+		}
+
+		_, err = kClient.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 		return err
 	})
 	if err != nil {
