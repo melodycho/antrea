@@ -116,6 +116,7 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 	// 	}
 	// }
 
+	testPodIndex := 0
 	for i, ns := range nss {
 
 		klog.InfoS("Scale up Services", "Namespace", ns)
@@ -125,19 +126,22 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				svc.Spec.IPFamilies = []corev1.IPFamily{ipFamily}
 			}
 			if err := utils.DefaultRetry(func() error {
+				clusterIP := startSvcCIDR + strconv.Itoa(i+1)
+
 				var podList *corev1.PodList
 				podList, err = cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 				if err != nil {
 					return fmt.Errorf("list test Pod error: %+v", err)
 				}
+				if testPodIndex < len(podList.Items) {
+					fromPod := podList.Items[testPodIndex]
+					testPodIndex++
 
-				fromPod := podList.Items[0]
-
-				clusterIP := startSvcCIDR + strconv.Itoa(i+1)
-				if err = workload_pod.Update(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleClientPodProbeContainerName); err != nil {
-					klog.ErrorS(err, "Update test Pod failed")
+					if err = workload_pod.Update(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleClientPodProbeContainerName); err != nil {
+						klog.ErrorS(err, "Update test Pod failed")
+					}
+					klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
 				}
-				klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
 
 				var newSvc *corev1.Service
 				var err error
