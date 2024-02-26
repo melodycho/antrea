@@ -16,7 +16,6 @@ package framework
 
 //goland:noinspection ALL
 import (
-	"antrea.io/antrea/test/performance/framework/client_pod"
 	"context"
 	"fmt"
 	"time"
@@ -25,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"antrea.io/antrea/test/performance/framework/service"
 )
 
@@ -45,7 +45,9 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 	klog.InfoS("client Pods", "Pod num", len(clientPods.Items))
 
 	maxSvcCheckedCount := data.nodesNum
-	svcs, actualCheckNum, err := service.ScaleUp(ctx, data.kubeconfig, data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, clientPods.Items)
+	var actualCheckNum int
+	var svcs []service.ServiceInfo
+	svcs, actualCheckNum, err = service.ScaleUp(ctx, data.provider, data.controlPlaneNodes[0], data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, clientPods.Items)
 	if err != nil {
 		err = fmt.Errorf("scale up services error: %v", err)
 		return

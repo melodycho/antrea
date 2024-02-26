@@ -29,6 +29,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/antctl/runtime"
+	"antrea.io/antrea/test/e2e/providers"
 	"antrea.io/antrea/test/performance/config"
 	"antrea.io/antrea/test/performance/framework/client_pod"
 	"antrea.io/antrea/test/performance/framework/namespace"
@@ -113,13 +114,15 @@ type ScaleData struct {
 	kubernetesClientSet kubernetes.Interface
 	kubeconfig          *rest.Config
 	// clientPods          []corev1.Pod
-	namespaces       []string
-	Specification    *config.ScaleList
-	nodesNum         int
-	maxCheckNum      int
-	simulateNodesNum int
-	podsNumPerNs     int
-	checkTimeout     time.Duration
+	namespaces        []string
+	Specification     *config.ScaleList
+	nodesNum          int
+	maxCheckNum       int
+	simulateNodesNum  int
+	podsNumPerNs      int
+	checkTimeout      time.Duration
+	controlPlaneNodes []string
+	provider          providers.ProviderInterface
 }
 
 func createTestPodClients(ctx context.Context, kClient kubernetes.Interface, ns string) error {
@@ -223,6 +226,13 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	}
 	if len(masterNodes.Items) == 0 && len(controlPlaneNodes.Items) == 0 {
 		return nil, fmt.Errorf("can not find a master/control-plane Node in the cluster")
+	}
+	for _, node := range masterNodes.Items {
+		td.controlPlaneNodes = append(td.controlPlaneNodes, node.Name)
+	}
+	td.provider, err = providers.NewRemoteProvider("")
+	if err != nil {
+		return nil, err
 	}
 
 	td.kubernetesClientSet = kClient

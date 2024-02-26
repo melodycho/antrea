@@ -20,6 +20,9 @@ import (
 	"fmt"
 	"k8s.io/klog/v2"
 	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -94,4 +97,54 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 		return err
 	}
 	return nil
+}
+
+func extractSeconds(logEntry string) (int, error) {
+	re := regexp.MustCompile(`(\d+) seconds`)
+	matches := re.FindStringSubmatch(logEntry)
+
+	if len(matches) < 2 {
+		return 0, fmt.Errorf("no seconds found in the log entry")
+	}
+
+	secondsStr := matches[1]
+	seconds, err := strconv.Atoi(secondsStr)
+	if err != nil {
+		return 0, fmt.Errorf("error converting seconds to integer: %v", err)
+	}
+
+	return seconds, nil
+}
+
+func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration) error {
+	podLogOptions := &corev1.PodLogOptions{
+		Container: containerName,
+	}
+	podLogs, err := kc.CoreV1().Pods(namespace).GetLogs(podName, podLogOptions).Stream(ctx)
+	if err != nil {
+		return fmt.Errorf("error reading pod logs: %+v", err.Error())
+	}
+	defer podLogs.Close()
+
+	return wait.PollImmediateUntil(2*time.Second, func() (done bool, err error) {
+		buf := make([]byte, 1024)
+		for {
+			n, err := podLogs.Read(buf)
+			if n > 0 {
+				logEntry := string(buf[:n])
+				if strings.Contains(logEntry, "Status changed from") {
+					seconds, err := extractSeconds(logEntry)
+					if err != nil {
+						return false, err
+					}
+					ch <- time.Duration(seconds)
+					return true, nil
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		return false, nil
+	}, wait.NeverStop)
 }
