@@ -107,7 +107,7 @@ func retrieveCIDRs(provider providers.ProviderInterface, controlPlaneNodeName st
 	return res, nil
 }
 
-func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlPlaneNodeName string, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool, maxCheckNum int, ch chan time.Duration, clientPods []corev1.Pod) (svcs []ServiceInfo, actualCheckNum int, err error) {
+func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlPlaneNodeName string, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool, ch chan time.Duration) (svcs []ServiceInfo, actualCheckNum int, err error) {
 	start := time.Now()
 
 	var svcCIDRs []string
@@ -181,8 +181,8 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				svcs = append(svcs, ServiceInfo{Name: newSvc.Name, IP: newSvc.Spec.ClusterIP, NameSpace: newSvc.Namespace})
 
 				// ip := newSvc.Spec.ClusterIP
-
-				if fromPod != nil && actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {
+				klog.InfoS("go FetchTimestampFromLog", "actualCheckNum", actualCheckNum, "cap(ch)", cap(ch))
+				if fromPod != nil && actualCheckNum < cap(ch) {
 					// k := int(utils.GenRandInt()) % len(clientPods)
 					// clientPod := clientPods[k]
 					// klog.V(2).InfoS("Check service", "svc", svc, "Pod", clientPod.Name)

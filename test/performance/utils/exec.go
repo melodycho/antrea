@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"k8s.io/klog/v2"
 	"net/url"
 	"regexp"
@@ -117,39 +118,59 @@ func extractSeconds(logEntry string) (int, error) {
 }
 
 func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration) error {
-	podLogOptions := &corev1.PodLogOptions{
-		Container: containerName,
-	}
-
-	return wait.PollImmediateUntil(2*time.Second, func() (done bool, err error) {
-		podLogs, err := kc.CoreV1().Pods(namespace).GetLogs(podName, podLogOptions).Stream(ctx)
+	return wait.Poll(defaultInterval, defaultTimeout, func() (done bool, err error) {
+		req := kc.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+			Container: containerName,
+		})
+		podLogs, err := req.Stream(ctx)
 		if err != nil {
-			return false, fmt.Errorf("error reading pod logs: %+v", err.Error())
+			klog.ErrorS(err, "error when opening stream to retrieve logs for Pod", "namespace", namespace, "podName", podName)
+			return false, nil
 		}
 		defer podLogs.Close()
-		buf := make([]byte, 1024)
-		for {
-			n, err := podLogs.Read(buf)
-			if n > 0 {
-				logEntry := string(buf[:n])
-				if strings.Contains(logEntry, "Status changed from") {
-					seconds, err := extractSeconds(logEntry)
-					if err != nil {
-						return false, err
-					}
-					select {
-					case ch <- time.Duration(seconds):
-						klog.InfoS("Successfully write in channel")
-					default:
-						klog.InfoS("Skipped writing to the channel. No receiver.")
-					}
-					return true, nil
-				}
-			}
-			if err != nil {
-				break
-			}
+
+		var b bytes.Buffer
+		if _, err := io.Copy(&b, podLogs); err != nil {
+			return false, fmt.Errorf("error when copying logs for Pod '%s/%s': %w", namespace, podName, err)
 		}
+		klog.InfoS("GetLogs from probe container", "logs", b.String())
+		if strings.Contains(b.String(), "Status changed from") {
+			seconds, err := extractSeconds(b.String())
+			if err != nil {
+				return false, err
+			}
+			select {
+			case ch <- time.Duration(seconds):
+				klog.InfoS("Successfully write in channel")
+			default:
+				klog.InfoS("Skipped writing to the channel. No receiver.")
+			}
+			return true, nil
+		}
+
+		// podLogs, err := kc.CoreV1().Pods(namespace).GetLogs(podName, podLogOptions).Stream(ctx)
+		// if err != nil {
+		// 	return false, fmt.Errorf("error reading pod logs: %+v", err.Error())
+		// }
+		// defer podLogs.Close()
+		// buf := make([]byte, 1024)
+		// n, err := podLogs.Read(buf)
+		// if n > 0 {
+		// 	logEntry := string(buf[:n])
+		// 	if strings.Contains(logEntry, "Status changed from") {
+		// 		seconds, err := extractSeconds(logEntry)
+		// 		if err != nil {
+		// 			return false, err
+		// 		}
+		// 		select {
+		// 		case ch <- time.Duration(seconds):
+		// 			klog.InfoS("Successfully write in channel")
+		// 		default:
+		// 			klog.InfoS("Skipped writing to the channel. No receiver.")
+		// 		}
+		// 		return true, nil
+		// 	}
+		// }
 		return false, nil
-	}, wait.NeverStop)
+	})
 }

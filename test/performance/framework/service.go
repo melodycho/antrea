@@ -44,10 +44,9 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 
 	klog.InfoS("client Pods", "Pod num", len(clientPods.Items))
 
-	maxSvcCheckedCount := data.nodesNum
 	var actualCheckNum int
 	var svcs []service.ServiceInfo
-	svcs, actualCheckNum, err = service.ScaleUp(ctx, data.provider, data.controlPlaneNodes[0], data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, clientPods.Items)
+	svcs, actualCheckNum, err = service.ScaleUp(ctx, data.provider, data.controlPlaneNodes[0], data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, ch)
 	if err != nil {
 		res.err = fmt.Errorf("scale up services error: %v", err)
 		return
