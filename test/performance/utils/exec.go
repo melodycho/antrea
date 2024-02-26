@@ -120,13 +120,13 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 	podLogOptions := &corev1.PodLogOptions{
 		Container: containerName,
 	}
-	podLogs, err := kc.CoreV1().Pods(namespace).GetLogs(podName, podLogOptions).Stream(ctx)
-	if err != nil {
-		return fmt.Errorf("error reading pod logs: %+v", err.Error())
-	}
-	defer podLogs.Close()
 
 	return wait.PollImmediateUntil(2*time.Second, func() (done bool, err error) {
+		podLogs, err := kc.CoreV1().Pods(namespace).GetLogs(podName, podLogOptions).Stream(ctx)
+		if err != nil {
+			return false, fmt.Errorf("error reading pod logs: %+v", err.Error())
+		}
+		defer podLogs.Close()
 		buf := make([]byte, 1024)
 		for {
 			n, err := podLogs.Read(buf)
@@ -137,7 +137,12 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 					if err != nil {
 						return false, err
 					}
-					ch <- time.Duration(seconds)
+					select {
+					case ch <- time.Duration(seconds):
+						klog.InfoS("Successfully write in channel")
+					default:
+						klog.InfoS("Skipped writing to the channel. No receiver.")
+					}
 					return true, nil
 				}
 			}

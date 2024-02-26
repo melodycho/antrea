@@ -49,7 +49,7 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 	var svcs []service.ServiceInfo
 	svcs, actualCheckNum, err = service.ScaleUp(ctx, data.provider, data.controlPlaneNodes[0], data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, maxSvcCheckedCount, ch, clientPods.Items)
 	if err != nil {
-		err = fmt.Errorf("scale up services error: %v", err)
+		res.err = fmt.Errorf("scale up services error: %v", err)
 		return
 	}
 	res.scaleNum = len(svcs)
