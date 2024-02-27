@@ -74,6 +74,7 @@ func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podNam
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      pod.Name,
 				Namespace: pod.Namespace,
+				Labels:    pod.Labels,
 			},
 			Spec: pod.Spec,
 		}
