@@ -100,7 +100,7 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 	return nil
 }
 
-func extractNanoseconds(logEntry string) (int, error) {
+func extractNanoseconds(logEntry string) (int64, error) {
 	re := regexp.MustCompile(`(\d+)\s+Status changed from (unknown|down)? to up after`)
 	matches := re.FindStringSubmatch(logEntry)
 
@@ -114,10 +114,10 @@ func extractNanoseconds(logEntry string) (int, error) {
 		return 0, fmt.Errorf("error converting nanoseconds to integer: %v", err)
 	}
 
-	return nanoseconds, nil
+	return int64(nanoseconds), nil
 }
 
-func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration, startTime int) error {
+func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration, startTime int64) error {
 	return wait.Poll(defaultInterval, defaultTimeout, func() (done bool, err error) {
 		req := kc.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 			Container: containerName,

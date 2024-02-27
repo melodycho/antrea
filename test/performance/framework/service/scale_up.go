@@ -125,10 +125,6 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 	klog.InfoS("retrieveCIDRs", "svcCIDRs", svcCIDRs)
 	svcCIDRIPv4 = svcCIDRs[0]
 	_, ipNet, _ := net.ParseCIDR(svcCIDRIPv4)
-	// 	var parsedIPs []net.IP
-	//	for _, ip := range reservedIPs {
-	//		parsedIPs = append(parsedIPs, net.ParseIP(ip))
-	//	}
 	allocator, err := ipallocator.NewCIDRAllocator(ipNet, []net.IP{net.ParseIP("10.96.0.1"), net.ParseIP("10.96.0.10")})
 
 	for _, ns := range nss {
@@ -152,7 +148,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				}
 
 				var fromPod *corev1.Pod
-				if testPodIndex < len(podList.Items) {
+				if testPodIndex < len(podList.Items) && actualCheckNum < cap(ch) {
 					fromPod = &podList.Items[testPodIndex]
 					testPodIndex++
 
@@ -166,7 +162,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				var newSvc *corev1.Service
 				var err error
 				svc.Spec.ClusterIP = clusterIP.String()
-				startTimeStamp := time.Now().Nanosecond()
+				startTimeStamp := time.Now().UnixNano()
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 				if err != nil {
 					if errors.IsAlreadyExists(err) {

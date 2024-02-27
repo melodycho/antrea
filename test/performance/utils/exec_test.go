@@ -26,5 +26,4 @@ func TestExtractSeconds(t *testing.T) {
 		}
 		fmt.Println(res)
 	}
-
 }
