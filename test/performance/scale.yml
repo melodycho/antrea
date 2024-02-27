@@ -1,4 +1,3 @@
-timeout: 15m
 ipv6: false
 real_node: true
 repeat_times: 1

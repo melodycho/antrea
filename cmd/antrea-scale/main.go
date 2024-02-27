@@ -94,7 +94,7 @@ func run() error {
 			}
 			time.Sleep(config.WaitInterval)
 		}
-		klog.Infoln(strings.Repeat("==", 100))
+		klog.Infoln(strings.Repeat("==", 72))
 	}
 	return nil
 }
