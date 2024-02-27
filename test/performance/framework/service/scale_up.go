@@ -129,11 +129,16 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 	//	for _, ip := range reservedIPs {
 	//		parsedIPs = append(parsedIPs, net.ParseIP(ip))
 	//	}
-	allocator, err := ipallocator.NewCIDRAllocator(ipNet, nil)
+	allocator, err := ipallocator.NewCIDRAllocator(ipNet, []net.IP{net.ParseIP("10.96.0.1"), net.ParseIP("10.96.0.10")})
 
-	testPodIndex := 0
 	for _, ns := range nss {
 		klog.InfoS("Scale up Services", "Namespace", ns)
+		testPodIndex := 0
+		var podList *corev1.PodList
+		podList, err = cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return
+		}
 		for _, svc := range generateService(ns, numPerNs) {
 			if ipv6 {
 				ipFamily := corev1.IPv6Protocol
@@ -146,11 +151,6 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 					return fmt.Errorf("allocate IP from ServiceCIDR error: %+v", err)
 				}
 
-				var podList *corev1.PodList
-				podList, err = cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return fmt.Errorf("list test Pod error: %+v", err)
-				}
 				var fromPod *corev1.Pod
 				if testPodIndex < len(podList.Items) {
 					fromPod = &podList.Items[testPodIndex]

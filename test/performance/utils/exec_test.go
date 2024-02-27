@@ -6,9 +6,25 @@ import (
 )
 
 func TestExtractSeconds(t *testing.T) {
-	res, err := extractSeconds("Fri Feb 23 06:52:14 UTC 2024 Status changed from unknown to up after 100 seconds")
-	if err != nil {
-		fmt.Println(err)
+	testCases := []struct {
+		name string
+		log  string
+	}{
+		{
+			name: "",
+			log:  "1234567 Status changed from unknown to up after 100 seconds",
+		},
+		{
+			name: "",
+			log:  "12345678 Status changed from down to up after 100 seconds",
+		},
 	}
-	fmt.Println(res)
+	for _, tc := range testCases {
+		res, err := extractNanoseconds(tc.log)
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println(res)
+	}
+
 }

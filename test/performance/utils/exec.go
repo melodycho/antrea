@@ -101,8 +101,7 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 }
 
 func extractNanoseconds(logEntry string) (int, error) {
-	// 1709005058989452190 Status changed from unknown to up after 30217985 seconds
-	re := regexp.MustCompile(`(\d+) Status changed from`)
+	re := regexp.MustCompile(`(\d+)\s+Status changed from (unknown|down)? to up after`)
 	matches := re.FindStringSubmatch(logEntry)
 
 	if len(matches) < 2 {
@@ -134,8 +133,8 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 		if _, err := io.Copy(&b, podLogs); err != nil {
 			return false, fmt.Errorf("error when copying logs for Pod '%s/%s': %w", namespace, podName, err)
 		}
-		klog.InfoS("GetLogs from probe container", "logs", b.String())
-		if strings.Contains(b.String(), "Status changed from unknown to up") {
+		klog.InfoS("GetLogs from probe container", "podName", podName, "namespace", namespace, "logs", b.String())
+		if strings.Contains(b.String(), "to up") {
 			changedTimeStamp, err := extractNanoseconds(b.String())
 			if err != nil {
 				return false, err
