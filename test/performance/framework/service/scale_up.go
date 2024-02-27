@@ -166,6 +166,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				var newSvc *corev1.Service
 				var err error
 				svc.Spec.ClusterIP = clusterIP.String()
+				startTimeStamp := time.Now().Nanosecond()
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 				if err != nil {
 					if errors.IsAlreadyExists(err) {
@@ -191,7 +192,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 						// if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, clientPod.Namespace, clientPod.Name, ip, false); err != nil {
 						// 	klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 						// }
-						if err := utils.FetchTimestampFromLog(ctx, cs, fromPod.Namespace, fromPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch); err != nil {
+						if err := utils.FetchTimestampFromLog(ctx, cs, fromPod.Namespace, fromPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp); err != nil {
 							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", fromPod.Name, "svc", svc)
 						}
 					}()

@@ -100,24 +100,25 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 	return nil
 }
 
-func extractSeconds(logEntry string) (int, error) {
-	re := regexp.MustCompile(`(\d+) seconds`)
+func extractNanoseconds(logEntry string) (int, error) {
+	// 1709005058989452190 Status changed from unknown to up after 30217985 seconds
+	re := regexp.MustCompile(`(\d+) Status changed from`)
 	matches := re.FindStringSubmatch(logEntry)
 
 	if len(matches) < 2 {
-		return 0, fmt.Errorf("no seconds found in the log entry")
+		return 0, fmt.Errorf("no nanoseconds found in the log entry")
 	}
 
-	secondsStr := matches[1]
-	seconds, err := strconv.Atoi(secondsStr)
+	timestampStr := matches[1]
+	nanoseconds, err := strconv.Atoi(timestampStr)
 	if err != nil {
-		return 0, fmt.Errorf("error converting seconds to integer: %v", err)
+		return 0, fmt.Errorf("error converting nanoseconds to integer: %v", err)
 	}
 
-	return seconds, nil
+	return nanoseconds, nil
 }
 
-func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration) error {
+func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration, startTime int) error {
 	return wait.Poll(defaultInterval, defaultTimeout, func() (done bool, err error) {
 		req := kc.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 			Container: containerName,
@@ -134,13 +135,13 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 			return false, fmt.Errorf("error when copying logs for Pod '%s/%s': %w", namespace, podName, err)
 		}
 		klog.InfoS("GetLogs from probe container", "logs", b.String())
-		if strings.Contains(b.String(), "Status changed from") {
-			seconds, err := extractSeconds(b.String())
+		if strings.Contains(b.String(), "Status changed from unknown to up") {
+			changedTimeStamp, err := extractNanoseconds(b.String())
 			if err != nil {
 				return false, err
 			}
 			select {
-			case ch <- time.Duration(seconds):
+			case ch <- time.Duration(changedTimeStamp - startTime):
 				klog.InfoS("Successfully write in channel")
 			default:
 				klog.InfoS("Skipped writing to the channel. No receiver.")
@@ -158,7 +159,7 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 		// if n > 0 {
 		// 	logEntry := string(buf[:n])
 		// 	if strings.Contains(logEntry, "Status changed from") {
-		// 		seconds, err := extractSeconds(logEntry)
+		// 		seconds, err := extractNanoseconds(logEntry)
 		// 		if err != nil {
 		// 			return false, err
 		// 		}
