@@ -120,7 +120,7 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 			time.Sleep(time.Duration(utils.GenRandInt()%100) * time.Millisecond)
 			labelNum := i/2 + 1
 			gErr.Go(func() error {
-				podName := fmt.Sprintf("antrea-scale-test-pod-%s", uuid.New().String())
+				podName := fmt.Sprintf("antrea-scale-test-pod-server-%s", uuid.New().String()[:8])
 				pod := newWorkloadPod(podName, ns, true, labelNum)
 				// if !data.Specification.RealNode {
 				// 	onRealNode := (index % data.nodesNum) >= data.simulateNodesNum

@@ -143,10 +143,11 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				}
 				actualCheckNum++
 				if fromPod.Namespace != client_pod.ClientPodsNamespace {
-					if err = workload_pod.Update(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", ip, 80)}, workload_pod.ScaleClientPodProbeContainerName); err != nil {
+					clientPod, err := workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", ip, 80)}, workload_pod.ScaleClientPodProbeContainerName)
+					if err != nil {
 						klog.ErrorS(err, "Update test Pod failed")
 					}
-					klog.InfoS("Update test Pod to check NetworkPolicy")
+					klog.InfoS("Create test Pod to check NetworkPolicy", "Name", clientPod.Name, "Namespace", clientPod.Namespace)
 				}
 				go func() {
 					if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, true); err != nil {

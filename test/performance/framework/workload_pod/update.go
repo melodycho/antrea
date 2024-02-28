@@ -19,9 +19,10 @@ const (
 	ScaleTestPodProbeContainerName   = "antrea-scale-test-pod-probe"
 )
 
-func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podName string, probes []string, containerName string) error {
+func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, namespace, podName string, probes []string, containerName string) (*corev1.Pod, error) {
 	var err error
 	expectContainerNum := 0
+	var newPod *corev1.Pod
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
@@ -57,22 +58,22 @@ func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podNam
 		pod.Spec.Containers = append(pod.Spec.Containers, containers...)
 		expectContainerNum = len(pod.Spec.Containers)
 
-		err = kClient.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-		if err != nil {
-			return err
-		}
-
-		err = wait.PollImmediate(2*time.Second, 60*time.Second, func() (done bool, err error) {
-			_, err = kClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
-			return err != nil, nil
-		})
-
-		if err != nil {
-			return fmt.Errorf("error waiting for Pod termination: %v", err)
-		}
-		newPod := &corev1.Pod{
+		// err = kClient.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+		// if err != nil {
+		// 	return err
+		// }
+		//
+		// err = wait.PollImmediate(2*time.Second, 60*time.Second, func() (done bool, err error) {
+		// 	_, err = kClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+		// 	return err != nil, nil
+		// })
+		//
+		// if err != nil {
+		// 	return fmt.Errorf("error waiting for Pod termination: %v", err)
+		// }
+		newPod = &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      pod.Name,
+				Name:      strings.Replace(pod.Name, "server", "client", 1),
 				Namespace: pod.Namespace,
 				Labels:    pod.Labels,
 			},
@@ -83,11 +84,11 @@ func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podNam
 		return err
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = wait.PollImmediate(time.Second, 30, func() (bool, error) {
-		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, newPod.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -99,9 +100,9 @@ func Update(ctx context.Context, kClient kubernetes.Interface, namespace, podNam
 		return false, nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	klog.InfoS("Container added successfully!")
-	return nil
+	klog.InfoS("Create Client Pod successfully!")
+	return newPod, nil
 }

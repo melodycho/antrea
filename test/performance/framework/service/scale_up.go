@@ -147,18 +147,6 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 					return fmt.Errorf("allocate IP from ServiceCIDR error: %+v", err)
 				}
 
-				var fromPod *corev1.Pod
-				if testPodIndex < len(podList.Items) && actualCheckNum < cap(ch) {
-					fromPod = &podList.Items[testPodIndex]
-					testPodIndex++
-
-					if err = workload_pod.Update(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleTestPodProbeContainerName); err != nil {
-						klog.ErrorS(err, "Update test Pod failed")
-					}
-					klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
-					time.Sleep(1 * time.Second)
-				}
-
 				var newSvc *corev1.Service
 				var err error
 				svc.Spec.ClusterIP = clusterIP.String()
@@ -177,19 +165,20 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				klog.InfoS("Create Service", "Name", newSvc.Name, "ClusterIP", newSvc.Spec.ClusterIP, "Namespace", ns)
 				svcs = append(svcs, ServiceInfo{Name: newSvc.Name, IP: newSvc.Spec.ClusterIP, NameSpace: newSvc.Namespace})
 
-				// ip := newSvc.Spec.ClusterIP
 				klog.InfoS("go FetchTimestampFromLog", "actualCheckNum", actualCheckNum, "cap(ch)", cap(ch))
-				if fromPod != nil && actualCheckNum < cap(ch) {
-					// k := int(utils.GenRandInt()) % len(clientPods)
-					// clientPod := clientPods[k]
-					// klog.V(2).InfoS("Check service", "svc", svc, "Pod", clientPod.Name)
+				if actualCheckNum < cap(ch) {
 					actualCheckNum++
 					go func() {
-						// if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, clientPod.Namespace, clientPod.Name, ip, false); err != nil {
-						// 	klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
-						// }
-						if err := utils.FetchTimestampFromLog(ctx, cs, fromPod.Namespace, fromPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp); err != nil {
-							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", fromPod.Name, "svc", svc)
+						fromPod := &podList.Items[testPodIndex%len(podList.Items)]
+						testPodIndex++
+
+						clientPod, err := workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleTestPodProbeContainerName)
+						if err != nil {
+							klog.ErrorS(err, "Create client test Pod failed")
+						}
+						klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
+						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp); err != nil {
+							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 						}
 					}()
 				}
