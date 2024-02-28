@@ -109,6 +109,12 @@ func extractNanoseconds(logEntry string) (int64, error) {
 	}
 
 	timestampStr := matches[1]
+	// 1709088530251243475
+	// 170908853117632348
+	// not sure why some timestamps fetch from logs are invalid
+	for len(timestampStr) < 19 {
+		timestampStr += "0"
+	}
 	nanoseconds, err := strconv.Atoi(timestampStr)
 	if err != nil {
 		return 0, fmt.Errorf("error converting nanoseconds to integer: %v", err)
@@ -138,6 +144,9 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 			changedTimeStamp, err := extractNanoseconds(b.String())
 			if err != nil {
 				return false, err
+			}
+			if time.Duration(time.Now().UnixNano()-changedTimeStamp) > 8*time.Hour {
+				return false, fmt.Errorf("timestamp fetch from the client Pod log is invalid, please check")
 			}
 			select {
 			case ch <- time.Duration(changedTimeStamp - startTime):
