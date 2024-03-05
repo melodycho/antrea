@@ -51,8 +51,10 @@ function deploy() {
     # TODO: modify the final yaml to deploy kube-state-metrics in a control plane Node.
     kubectl apply -f ${DEFAULT_WORKDIR}/kube-state-metrics/kube-state-metrics.yml
 
+    kubectl apply -f ${DEFAULT_WORKDIR}/node_exporter/node-exporter.yml
+
     # ====== Install Prometheus ======
-    kubectl apply -f ${DEFAULT_WORKDIR}/prometheus/prometheus-all-in-one.yml
+    kubectl apply -f ${DEFAULT_WORKDIR}/prometheus/prometheus.yml
 
     # ====== Install Grafana ======
     kubectl create configmap grafana-dashboards --from-file=${DEFAULT_WORKDIR}/grafana/dashboards/
@@ -60,15 +62,24 @@ function deploy() {
 
     kubectl rollout status --timeout=2m deploy/grafana -n default
 
-    # Do port-forward to access grafana from outside of K8s
-    if [[ $LOCALHOST ]];then
-      nohup kubectl port-forward svc/grafana 3100:3000 &
-      echo "Please access grafana via http://localhost:3100 with admin/admin"
+    # Checking the port availability.
+    echo "Trying to expose the Grafana Service via port 3100"
+    set +e
+    if lsof -i:3100 > /dev/null;then
+      echo "The port 3100 is in use, you can expose the Grafana Service by running
+'kubectl port-forward svc/grafana \$new_port:3000'. The default credential is 'admin/admin'"
     else
-      nohup kubectl port-forward --address 0.0.0.0 svc/grafana 3100:3000 &
-      ip=$(hostname -I | awk '{print $1}')
-      echo "Please access grafana via http://$ip:3100 with admin/admin"
+      # Do port-forward to access grafana from outside of K8s
+      if [[ "$LOCALHOST" == true ]];then
+        nohup kubectl port-forward svc/grafana 3100:3000 &
+        echo "Please access grafana via http://localhost:3100 with admin/admin"
+      else
+        nohup kubectl port-forward --address 0.0.0.0 svc/grafana 3100:3000 &
+        ip=$(hostname -I | awk '{print $1}')
+        echo "Please access grafana via http://$ip:3100 with admin/admin"
+      fi
     fi
+    set -e
 }
 
 function destroy() {
