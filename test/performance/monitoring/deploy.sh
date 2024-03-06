@@ -8,7 +8,6 @@ _usage="Usage: $0 [--help|-h]
         --localhost                   Enable port-forwarding to localhost for Grafana access"
 
 WORKDIR=$(dirname "$0")
-source $WORKDIR/../tests/util.sh
 
 DESTROY=false
 DEFAULT_WORKDIR=$(dirname "$0")
@@ -85,6 +84,9 @@ function deploy() {
 function destroy() {
     # ====== Delete kube-state-metrics ======
     kubectl delete -f ${DEFAULT_WORKDIR}/kube-state-metrics/kube-state-metrics.yml || true
+
+    # ===== Delete node-exporter =====
+    kubectl delete -f ${DEFAULT_WORKDIR}/node_exporter/node-exporter.yml || true
 
     # ====== Delete Prometheus ======
     kubectl delete -f ${DEFAULT_WORKDIR}/prometheus/prometheus-all-in-one.yml || true
