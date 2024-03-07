@@ -123,7 +123,7 @@ func extractNanoseconds(logEntry string) (int64, error) {
 	return int64(nanoseconds), nil
 }
 
-func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration, startTime int64) error {
+func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespace, podName, containerName string, ch chan time.Duration, startTime int64, key string) error {
 	return wait.Poll(defaultInterval, defaultTimeout, func() (done bool, err error) {
 		req := kc.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 			Container: containerName,
@@ -140,7 +140,7 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 			return false, fmt.Errorf("error when copying logs for Pod '%s/%s': %w", namespace, podName, err)
 		}
 		klog.InfoS("GetLogs from probe container", "podName", podName, "namespace", namespace, "logs", b.String())
-		if strings.Contains(b.String(), "to up") {
+		if strings.Contains(b.String(), key) {
 			changedTimeStamp, err := extractNanoseconds(b.String())
 			if err != nil {
 				return false, err

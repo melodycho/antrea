@@ -64,11 +64,11 @@ func workloadPodTemplate(podName, ns string, labels map[string]string, onRealNod
 	var affinity *corev1.Affinity
 	var tolerations []corev1.Toleration
 	if onRealNode {
-		affinity = &RealNodeAffinity
-		tolerations = append(tolerations, MasterToleration)
+		affinity = &client_pod.RealNodeAffinity
+		tolerations = append(tolerations, client_pod.MasterToleration)
 	} else {
-		affinity = &SimulateAffinity
-		tolerations = append(tolerations, SimulateToleration)
+		affinity = &client_pod.SimulateAffinity
+		tolerations = append(tolerations, client_pod.SimulateToleration)
 	}
 	labels[workloadPodLabelKey] = workloadPodLabelValue
 	labels["name"] = podName

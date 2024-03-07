@@ -16,6 +16,8 @@ package client_pod
 
 import (
 	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
@@ -48,7 +50,80 @@ const (
 	ScaleAgentProbeContainerName      = "antrea-scale-test-agent-probe"
 	ScaleControllerProbeContainerName = "antrea-scale-test-controller-probe"
 	ScaleClientPodTemplateName        = "antrea-scale-test-client"
+	ScaleTestClientPodNamePrefix      = "antrea-scale-test-client-pod"
 
 	ScaleTestControllerProbeDaemonSet = "antrea-scale-test-controller-probe-daemonset"
 	ScaleTestAgentProbeDaemonSet      = "antrea-scale-test-agent-probe-daemonset"
+)
+
+var (
+	// RealNodeAffinity is used to make a Pod not to be scheduled to a simulated node.
+	RealNodeAffinity = corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      SimulatorNodeLabelKey,
+								Operator: corev1.NodeSelectorOpNotIn,
+								Values:   []string{SimulatorNodeLabelValue},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// SimulateAffinity is used to make a Pod to be scheduled to a simulated node.
+	SimulateAffinity = corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{
+					{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      SimulatorNodeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{SimulatorNodeLabelValue},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// SimulateToleration marks a Pod able to run on a simulate node.
+	SimulateToleration = corev1.Toleration{
+		Key:      SimulatorTaintKey,
+		Operator: corev1.TolerationOpEqual,
+		Value:    SimulatorTaintValue,
+		Effect:   corev1.TaintEffectNoExecute,
+	}
+
+	// MasterToleration marks a Pod able to run on the master node.
+	MasterToleration = corev1.Toleration{
+		Key:      "node-role.kubernetes.io/master",
+		Operator: corev1.TolerationOpExists,
+		Effect:   corev1.TaintEffectNoSchedule,
+	}
+
+	// ClientPodTemplate is the PodTemplateSpec of a scale test client Pod.
+	ClientPodTemplate = corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{ScaleClientPodTemplateName: ""}},
+		Spec: corev1.PodSpec{
+			Affinity:    &RealNodeAffinity,
+			Tolerations: []corev1.Toleration{MasterToleration},
+			Containers: []corev1.Container{
+				{
+					Name:            ScaleClientContainerName,
+					Image:           "busybox",
+					Command:         []string{"nc", "-lk", "-p", "80"},
+					ImagePullPolicy: corev1.PullIfNotPresent,
+				},
+			},
+		},
+	}
 )

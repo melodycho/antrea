@@ -37,75 +37,25 @@ import (
 )
 
 var (
-	// RealNodeAffinity is used to make a Pod not to be scheduled to a simulated node.
-	RealNodeAffinity = corev1.Affinity{
-		NodeAffinity: &corev1.NodeAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-				NodeSelectorTerms: []corev1.NodeSelectorTerm{
-					{
-						MatchExpressions: []corev1.NodeSelectorRequirement{
-							{
-								Key:      client_pod.SimulatorNodeLabelKey,
-								Operator: corev1.NodeSelectorOpNotIn,
-								Values:   []string{client_pod.SimulatorNodeLabelValue},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+// // RealNodeAffinity is used to make a Pod not to be scheduled to a simulated node.
+// RealNodeAffinity = corev1.Affinity{
+// 	NodeAffinity: &corev1.NodeAffinity{
+// 		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+// 			NodeSelectorTerms: []corev1.NodeSelectorTerm{
+// 				{
+// 					MatchExpressions: []corev1.NodeSelectorRequirement{
+// 						{
+// 							Key:      client_pod.SimulatorNodeLabelKey,
+// 							Operator: corev1.NodeSelectorOpNotIn,
+// 							Values:   []string{client_pod.SimulatorNodeLabelValue},
+// 						},
+// 					},
+// 				},
+// 			},
+// 		},
+// 	},
+// }
 
-	// SimulateAffinity is used to make a Pod to be scheduled to a simulated node.
-	SimulateAffinity = corev1.Affinity{
-		NodeAffinity: &corev1.NodeAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-				NodeSelectorTerms: []corev1.NodeSelectorTerm{
-					{
-						MatchExpressions: []corev1.NodeSelectorRequirement{
-							{
-								Key:      client_pod.SimulatorNodeLabelKey,
-								Operator: corev1.NodeSelectorOpIn,
-								Values:   []string{client_pod.SimulatorNodeLabelValue},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// SimulateToleration marks a Pod able to run on a simulate node.
-	SimulateToleration = corev1.Toleration{
-		Key:      client_pod.SimulatorTaintKey,
-		Operator: corev1.TolerationOpEqual,
-		Value:    client_pod.SimulatorTaintValue,
-		Effect:   corev1.TaintEffectNoExecute,
-	}
-
-	// MasterToleration marks a Pod able to run on the master node.
-	MasterToleration = corev1.Toleration{
-		Key:      "node-role.kubernetes.io/master",
-		Operator: corev1.TolerationOpExists,
-		Effect:   corev1.TaintEffectNoSchedule,
-	}
-
-	// clientPodTemplate is the PodTemplateSpec of a scale test client Pod.
-	clientPodTemplate = corev1.PodTemplateSpec{
-		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{client_pod.ScaleClientPodTemplateName: ""}},
-		Spec: corev1.PodSpec{
-			Affinity:    &RealNodeAffinity,
-			Tolerations: []corev1.Toleration{MasterToleration},
-			Containers: []corev1.Container{
-				{
-					Name:            client_pod.ScaleClientContainerName,
-					Image:           "busybox",
-					Command:         []string{"nc", "-lk", "-p", "80"},
-					ImagePullPolicy: corev1.PullIfNotPresent,
-				},
-			},
-		},
-	}
 )
 
 // ScaleData implemented the TestData interface and it provides clients for helping running
@@ -141,7 +91,7 @@ func createTestPodClients(ctx context.Context, kClient kubernetes.Interface, ns 
 			},
 			Spec: appsv1.DaemonSetSpec{
 				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{client_pod.ScaleClientPodTemplateName: ""}},
-				Template: clientPodTemplate,
+				Template: client_pod.ClientPodTemplate,
 			},
 		}, metav1.CreateOptions{})
 		return err
@@ -233,7 +183,7 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	for _, node := range controlPlaneNodes.Items {
 		td.controlPlaneNodes = append(td.controlPlaneNodes, node.Name)
 	}
-	klog.InfoS("controlPlaneNodes", "controlPlaneNodes", td.controlPlaneNodes)
+	klog.InfoS("List all ControlPlane Nodes in cluster", "controlPlaneNodes", td.controlPlaneNodes)
 	td.provider, err = providers.NewRemoteProvider("scale-test")
 	if err != nil {
 		return nil, err

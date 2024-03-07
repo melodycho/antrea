@@ -177,7 +177,8 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 							klog.ErrorS(err, "Create client test Pod failed")
 						}
 						klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
-						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp); err != nil {
+						key := "to up"
+						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
 							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 						}
 					}()
