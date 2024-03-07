@@ -230,6 +230,10 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	for _, node := range masterNodes.Items {
 		td.controlPlaneNodes = append(td.controlPlaneNodes, node.Name)
 	}
+	for _, node := range controlPlaneNodes.Items {
+		td.controlPlaneNodes = append(td.controlPlaneNodes, node.Name)
+	}
+	klog.InfoS("controlPlaneNodes", "controlPlaneNodes", td.controlPlaneNodes)
 	td.provider, err = providers.NewRemoteProvider("scale-test")
 	if err != nil {
 		return nil, err
