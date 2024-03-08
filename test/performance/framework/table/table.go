@@ -21,11 +21,11 @@ import (
 )
 
 const (
-	CtxAverageResponseTime = "AverageResponseTime"
-	CtxMaxResponseTime     = "MaxResponseTime"
-	CtxMinResponseTime     = "MinResponseTime"
-	CtxSampleQuantity      = "SampleQuantity"
-	CtxScaleNum            = "Scale"
+	CtxAverageEffectiveTime = "AverageEffectiveTime"
+	CtxMaxEffectiveTime     = "MaxEffectiveTime"
+	CtxMinEffectiveTime     = "MinEffectiveTime"
+	CtxSampleQuantity       = "SampleQuantity"
+	CtxScaleNum             = "Scale"
 )
 
 func GenerateRow(name, result string, duration, avgTime, maxTime, minTime, sampleQuantity, scaleNum string) []string {
@@ -41,7 +41,7 @@ func ShowResult(w io.Writer, rows [][]string) {
 	}
 	table.SetAutoFormatHeaders(false)
 	table.SetAlignment(tablewriter.ALIGN_CENTER)
-	headers := []string{"Name", "Result", CtxScaleNum, "Duration", CtxAverageResponseTime, CtxMaxResponseTime, CtxMinResponseTime, CtxSampleQuantity}
+	headers := []string{"Name", "Result", CtxScaleNum, "Duration", CtxAverageEffectiveTime, CtxMaxEffectiveTime, CtxMinEffectiveTime, CtxSampleQuantity}
 	table.SetHeader(headers)
 	table.SetAutoMergeCells(true)
 	table.SetAutoWrapText(true)
