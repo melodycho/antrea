@@ -100,8 +100,8 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 	return nil
 }
 
-func extractNanoseconds(logEntry string) (int64, error) {
-	re := regexp.MustCompile(`(\d+)\s+Status changed from (unknown|down)? to up after`)
+func extractNanoseconds(logEntry, key string) (int64, error) {
+	re := regexp.MustCompile(fmt.Sprintf(`(\d+)\s+Status changed from (unknown|down|up)? %s after`, key))
 	matches := re.FindStringSubmatch(logEntry)
 
 	if len(matches) < 2 {
@@ -141,7 +141,7 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 		}
 		klog.InfoS("GetLogs from probe container", "podName", podName, "namespace", namespace, "logs", b.String())
 		if strings.Contains(b.String(), key) {
-			changedTimeStamp, err := extractNanoseconds(b.String())
+			changedTimeStamp, err := extractNanoseconds(b.String(), key)
 			if err != nil {
 				return false, err
 			}

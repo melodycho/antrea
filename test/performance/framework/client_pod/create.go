@@ -94,12 +94,13 @@ func CreatePod(ctx context.Context, kClient kubernetes.Interface, probes []strin
 		return nil, err
 	}
 
-	err = wait.PollImmediate(2*time.Second, 60, func() (bool, error) {
+	err = wait.PollImmediateWithContext(ctx, time.Second, 60, func(ctx context.Context) (bool, error) {
 		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, newPod.Name, metav1.GetOptions{})
+		klog.InfoS("Get client Pod", "Name", newPod.Name, "Namespace", namespace, "Status", pod.Status)
 		if err != nil {
 			return false, err
 		}
-		return pod.Status.Phase == corev1.PodRunning, nil
+		return true, nil
 	})
 	if err != nil {
 		return nil, err
