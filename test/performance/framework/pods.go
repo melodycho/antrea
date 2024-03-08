@@ -164,14 +164,6 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 			ch <- time.Since(start)
 			count++
 		}
-		// go func() {
-		// 	select {
-		// 	case ch <- time.Since(start):
-		// 		klog.InfoS("Successfully write in channel")
-		// 	default:
-		// 		klog.InfoS("Skipped writing to the channel. No receiver.")
-		// 	}
-		// }()
 	}
 	res.actualCheckNum = count
 	klog.InfoS("Scaled up Pods", "Duration", time.Since(start), "count", podNum*len(data.namespaces))

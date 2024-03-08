@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/performance/framework/client_pod"
@@ -92,7 +91,7 @@ type NetworkPolicyInfo struct {
 	Spec      netv1.NetworkPolicySpec
 }
 
-func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interface, nss []string, numPerNs int, clientPods []corev1.Pod, ipv6 bool, maxCheckNum int, ch chan time.Duration) (actualCheckNum int, err error) {
+func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerNs int, ch chan time.Duration) (actualCheckNum int, err error) {
 	// ScaleUp networkPolicies
 	start := time.Now()
 	for _, ns := range nss {
@@ -102,40 +101,42 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 		}
 		klog.InfoS("Scale up NetworkPolicies", "Num", len(npsData), "Namespace", ns)
 		for _, np := range npsData {
-			var npInfo NetworkPolicyInfo
+			npInfo := NetworkPolicyInfo{Name: np.Name, Namespace: np.Namespace, Spec: np.Spec}
+			shouldCheck := actualCheckNum < cap(ch)
+			var clientPod *corev1.Pod
+			var serverIP string
+			if shouldCheck {
+				serverIP, err = selectServerPod(ctx, cs, ns, npInfo)
+				klog.InfoS("Select server Pod", "serverIP", serverIP, "error", err)
+				if err != nil {
+					klog.ErrorS(err, "selectServerPod")
+					return
+				}
+				clientPod, err = client_pod.CreatePod(ctx, cs, []string{fmt.Sprintf("%s:%d", serverIP, 80)}, client_pod.ScaleClientPodProbeContainer)
+				if err != nil {
+					klog.ErrorS(err, "Create client test Pod failed")
+					return
+				}
+			}
 			if err := utils.DefaultRetry(func() error {
-				newNP, err := cs.NetworkingV1().NetworkPolicies(ns).Create(ctx, np, metav1.CreateOptions{})
+				_, err := cs.NetworkingV1().NetworkPolicies(ns).Create(ctx, np, metav1.CreateOptions{})
 				if err != nil {
 					if errors.IsAlreadyExists(err) {
-						newNP, _ = cs.NetworkingV1().NetworkPolicies(ns).Get(ctx, np.Name, metav1.GetOptions{})
+						_, _ = cs.NetworkingV1().NetworkPolicies(ns).Get(ctx, np.Name, metav1.GetOptions{})
 					} else {
 						return err
 					}
 				}
-				npInfo = NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
-				if actualCheckNum < cap(ch) {
+				if shouldCheck && clientPod != nil && serverIP != "" {
 					startTimeStamp := time.Now().UnixNano()
-					serverIP, err := selectServerPod(ctx, cs, ns, npInfo)
-					klog.InfoS("Select server Pod", "serverIP", serverIP, "error", err)
-					if err != nil {
-						klog.ErrorS(err, "selectServerPod")
-						return err
-					}
-					if serverIP != "" {
-						actualCheckNum++
-						go func() {
-							clientPod, err := client_pod.CreatePod(ctx, cs, []string{fmt.Sprintf("%s:%d", serverIP, 80)}, client_pod.ScaleClientPodProbeContainer)
-							if err != nil {
-								klog.ErrorS(err, "Create client test Pod failed")
-								return
-							}
-							klog.InfoS("Update test Pod to check NetworkPolicy", "serverIP", serverIP)
-							key := "to down"
-							if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, client_pod.ScaleClientPodProbeContainer, ch, startTimeStamp, key); err != nil {
-								klog.ErrorS(err, "Checking the validity the NetworkPolicy error", "ClientPodName", clientPod.Name, "NetworkPolicy", npInfo)
-							}
-						}()
-					}
+					actualCheckNum++
+					go func() {
+						klog.InfoS("Update test Pod to check NetworkPolicy", "serverIP", serverIP)
+						key := "to down"
+						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, client_pod.ScaleClientPodProbeContainer, ch, startTimeStamp, key); err != nil {
+							klog.ErrorS(err, "Checking the validity the NetworkPolicy error", "ClientPodName", clientPod.Name, "NetworkPolicy", npInfo)
+						}
+					}()
 				}
 				return nil
 			}); err != nil {

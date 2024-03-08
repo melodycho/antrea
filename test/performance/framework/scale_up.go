@@ -41,16 +41,15 @@ import (
 type ScaleData struct {
 	kubernetesClientSet kubernetes.Interface
 	kubeconfig          *rest.Config
-	// clientPods          []corev1.Pod
-	namespaces        []string
-	Specification     *config.ScaleList
-	nodesNum          int
-	maxCheckNum       int
-	simulateNodesNum  int
-	podsNumPerNs      int
-	checkTimeout      time.Duration
-	controlPlaneNodes []string
-	provider          providers.ProviderInterface
+	namespaces          []string
+	Specification       *config.ScaleList
+	nodesNum            int
+	maxCheckNum         int
+	simulateNodesNum    int
+	podsNumPerNs        int
+	checkTimeout        time.Duration
+	controlPlaneNodes   []string
+	provider            providers.ProviderInterface
 }
 
 func createTestPodClients(ctx context.Context, kClient kubernetes.Interface, ns string) error {

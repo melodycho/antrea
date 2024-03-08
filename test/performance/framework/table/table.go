@@ -15,9 +15,10 @@
 package table
 
 import (
-	"github.com/olekukonko/tablewriter"
 	"io"
 	"strings"
+
+	"github.com/olekukonko/tablewriter"
 )
 
 const (

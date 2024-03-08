@@ -88,17 +88,6 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		res.err = err
 	}()
 
-	// var controllerPods *v1.PodList
-	// controllerPods, err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
-	// if err != nil {
-	// 	return
-	// }
-	// if len(controllerPods.Items) < 1 {
-	// 	err = fmt.Errorf("no Antrea Controller Pods")
-	// 	return
-	// }
-	// controllerPods.Items[0].Status.PodIP
-
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
 	expectPodNum := data.nodesNum - data.simulateNodesNum
