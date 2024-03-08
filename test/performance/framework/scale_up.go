@@ -36,28 +36,6 @@ import (
 	"antrea.io/antrea/test/performance/utils"
 )
 
-var (
-// // RealNodeAffinity is used to make a Pod not to be scheduled to a simulated node.
-// RealNodeAffinity = corev1.Affinity{
-// 	NodeAffinity: &corev1.NodeAffinity{
-// 		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-// 			NodeSelectorTerms: []corev1.NodeSelectorTerm{
-// 				{
-// 					MatchExpressions: []corev1.NodeSelectorRequirement{
-// 						{
-// 							Key:      client_pod.SimulatorNodeLabelKey,
-// 							Operator: corev1.NodeSelectorOpNotIn,
-// 							Values:   []string{client_pod.SimulatorNodeLabelValue},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	},
-// }
-
-)
-
 // ScaleData implemented the TestData interface and it provides clients for helping running
 // scale test cases.
 type ScaleData struct {

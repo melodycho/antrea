@@ -142,39 +142,6 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				return 0, err
 			}
 			klog.InfoS("Create new NetworkPolicy", "npInfo", npInfo)
-			// if actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {
-			// 	// Check connection of Pods in NetworkPolicies, workload Pods
-			// 	fromPod, ip, err := SelectConnectPod(ctx, cs, npInfo.Namespace, &npInfo)
-			// 	if err != nil || fromPod == nil || ip == "" {
-			// 		continue
-			// 	}
-			// 	actualCheckNum++
-			// 	go func() {
-			// 		if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, false); err != nil {
-			// 			klog.ErrorS(err, "the connection should be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
-			// 		}
-			// 	}()
-			// }
-			// if actualCheckNum < maxCheckNum && actualCheckNum < cap(ch) {
-			// 	// Check isolation of Pods in NetworkPolicies, client Pods to workload Pods
-			// 	fromPod, ip, err := SelectIsoPod(ctx, cs, np.Namespace, npInfo, clientPods)
-			// 	if err != nil || fromPod == nil || ip == "" {
-			// 		continue
-			// 	}
-			// 	actualCheckNum++
-			// 	if fromPod.Namespace != client_pod.ClientPodsNamespace {
-			// 		clientPod, err := workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", ip, 80)}, workload_pod.ScaleClientPodProbeContainerName)
-			// 		if err != nil {
-			// 			klog.ErrorS(err, "Update test Pod failed")
-			// 		}
-			// 		klog.InfoS("Create test Pod to check NetworkPolicy", "Name", clientPod.Name, "Namespace", clientPod.Namespace)
-			// 	}
-			// 	go func() {
-			// 		if err := utils.WaitUntil(ctx, ch, kubeConfig, cs, fromPod.Namespace, fromPod.Name, ip, true); err != nil {
-			// 			klog.ErrorS(err, "the connection should not be success", "NetworkPolicyName", np.Name, "FromPodName", fromPod.Name, "ToIP", ip)
-			// 		}
-			// 	}()
-			// }
 		}
 	}
 	klog.InfoS("Scale up NetworkPolicies", "Duration", time.Since(start), "actualCheckNum", actualCheckNum)

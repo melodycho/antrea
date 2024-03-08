@@ -90,7 +90,6 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 		var stdout, stderr bytes.Buffer
 		if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr}); err != nil {
 			err := fmt.Errorf("executing commands on service client Pod error: %v", err)
-			// klog.ErrorS(err, "Check readiness of service", "ServiceName", svc.Name, "ClientPodName", clientPod.Name, "stdout", stdout.String(), "stderr", stderr.String())
 			return fmt.Errorf("ping ip %s error: %v, stdout:`%s`, stderr:`%s`, client pod: %s", ip, err, stdout.String(), stderr.String(), podName)
 		}
 		return nil
@@ -156,30 +155,6 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 			}
 			return true, nil
 		}
-
-		// podLogs, err := kc.CoreV1().Pods(namespace).GetLogs(podName, podLogOptions).Stream(ctx)
-		// if err != nil {
-		// 	return false, fmt.Errorf("error reading pod logs: %+v", err.Error())
-		// }
-		// defer podLogs.Close()
-		// buf := make([]byte, 1024)
-		// n, err := podLogs.Read(buf)
-		// if n > 0 {
-		// 	logEntry := string(buf[:n])
-		// 	if strings.Contains(logEntry, "Status changed from") {
-		// 		seconds, err := extractNanoseconds(logEntry)
-		// 		if err != nil {
-		// 			return false, err
-		// 		}
-		// 		select {
-		// 		case ch <- time.Duration(seconds):
-		// 			klog.InfoS("Successfully write in channel")
-		// 		default:
-		// 			klog.InfoS("Skipped writing to the channel. No receiver.")
-		// 		}
-		// 		return true, nil
-		// 	}
-		// }
 		return false, nil
 	})
 }

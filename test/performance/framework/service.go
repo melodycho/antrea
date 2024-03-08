@@ -67,25 +67,6 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 		}
 	}()
 
-	// start := time.Now()
-	// actualCheckNum := 0
-	// for i := range svcs {
-	// 	svcCheckStart := time.Now()
-	// 	if utils.CheckTimeout(start, data.checkTimeout) || i > maxSvcCheckedCount {
-	// 		klog.InfoS("Services check deadline exceeded", "count", i)
-	// 		break
-	// 	}
-	// 	k := int(utils.GenRandInt()) % len(data.clientPods)
-	// 	clientPod := data.clientPods[k]
-	// 	svc := svcs[i]
-	// 	if err = utils.PingIP(ctx, data.kubeconfig, data.kubernetesClientSet, clientPod.Namespace, clientPod.Name, svc.IP); err != nil {
-	// 		klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
-	// 		return
-	// 	}
-	// 	ch <- time.Since(svcCheckStart)
-	// 	actualCheckNum++
-	// 	klog.V(2).InfoS("Check service", "svc", svc, "Pod", clientPod.Name)
-	// }
 	res.actualCheckNum = actualCheckNum
 	return
 }

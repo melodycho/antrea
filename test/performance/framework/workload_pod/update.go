@@ -1,3 +1,17 @@
+// Copyright 2024 Antrea Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package workload_pod
 
 import (
@@ -15,8 +29,7 @@ import (
 )
 
 const (
-	ScaleClientPodProbeContainerName = "antrea-scale-test-client-pod-probe"
-	ScaleTestPodProbeContainerName   = "antrea-scale-test-pod-probe"
+	ScaleTestPodProbeContainerName = "antrea-scale-test-pod-probe"
 )
 
 func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, namespace, podName string, probes []string, containerName string) (*corev1.Pod, error) {
@@ -58,19 +71,6 @@ func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, namespac
 		pod.Spec.Containers = append(pod.Spec.Containers, containers...)
 		expectContainerNum = len(pod.Spec.Containers)
 
-		// err = kClient.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-		// if err != nil {
-		// 	return err
-		// }
-		//
-		// err = wait.PollImmediate(2*time.Second, 60*time.Second, func() (done bool, err error) {
-		// 	_, err = kClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
-		// 	return err != nil, nil
-		// })
-		//
-		// if err != nil {
-		// 	return fmt.Errorf("error waiting for Pod termination: %v", err)
-		// }
 		newPod = &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      strings.Replace(pod.Name, "server", "client", 1),
@@ -87,7 +87,7 @@ func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, namespac
 		return nil, err
 	}
 
-	err = wait.PollImmediate(time.Second, 30, func() (bool, error) {
+	err = wait.Poll(time.Second, 30, func() (bool, error) {
 		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, newPod.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err

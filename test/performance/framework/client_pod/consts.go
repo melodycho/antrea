@@ -51,9 +51,6 @@ const (
 	ScaleControllerProbeContainerName = "antrea-scale-test-controller-probe"
 	ScaleClientPodTemplateName        = "antrea-scale-test-client"
 	ScaleTestClientPodNamePrefix      = "antrea-scale-test-client-pod"
-
-	ScaleTestControllerProbeDaemonSet = "antrea-scale-test-controller-probe-daemonset"
-	ScaleTestAgentProbeDaemonSet      = "antrea-scale-test-agent-probe-daemonset"
 )
 
 var (
