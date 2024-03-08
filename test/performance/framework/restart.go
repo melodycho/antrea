@@ -18,6 +18,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	v1 "k8s.io/api/core/v1"
 	"time"
 
 	appv1 "k8s.io/api/apps/v1"
@@ -60,6 +61,21 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		return
 	}
 
+	startTime := time.Now().UnixNano()
+	go func() {
+		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
+		if err != nil {
+			err = fmt.Errorf("error when getting scale test client pods: %w", err)
+			return
+		}
+		for _, pod := range podList.Items {
+			key := "to up"
+			if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleAgentProbeContainerName, ch, startTime, key); err != nil {
+				klog.ErrorS(err, "Checking antrea agent restart time error", "ClientPodName", pod.Name)
+			}
+		}
+	}()
+
 	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var ds *appv1.DaemonSet
 		if err := utils.DefaultRetry(func() error {
@@ -79,12 +95,21 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	return
 }
 
+func getControllerPod(data *ScaleData, ctx context.Context) (*v1.Pod, error) {
+	controllerPods, err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
+	if err != nil {
+		return nil, err
+	}
+	if len(controllerPods.Items) < 1 {
+		return nil, fmt.Errorf("no Antrea Controller Pods")
+	}
+	return &controllerPods.Items[0], nil
+}
+
 func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
-	start := time.Now()
 	res.scaleNum = 1
 	defer func() {
-		ch <- time.Since(start)
 		res.err = err
 	}()
 
@@ -101,6 +126,24 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	if err != nil {
 		return
 	}
+	startTime := time.Now().UnixNano()
+	go func() {
+		controllerPod, err := getControllerPod(data, ctx)
+		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
+		if err != nil {
+			err = fmt.Errorf("error when getting scale test client pods: %w", err)
+			return
+		}
+		for _, pod := range podList.Items {
+			if pod.Spec.NodeName == controllerPod.Spec.NodeName {
+				key := "to up"
+				if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleControllerProbeContainerName, ch, startTime, key); err != nil {
+					klog.ErrorS(err, "Checking antrea controller restart time error", "ClientPodName", pod.Name)
+				}
+				break
+			}
+		}
+	}()
 	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var dp *appv1.Deployment
 		if err := utils.DefaultRetry(func() error {
