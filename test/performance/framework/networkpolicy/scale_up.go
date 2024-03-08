@@ -15,13 +15,9 @@
 package networkpolicy
 
 import (
-	"antrea.io/antrea/test/performance/framework/client_pod"
-	"antrea.io/antrea/test/performance/framework/workload_pod"
 	"context"
 	"fmt"
 	"time"
-
-	"k8s.io/klog/v2"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -31,7 +27,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"antrea.io/antrea/test/performance/utils"
 )
 
@@ -117,17 +115,23 @@ func ScaleUp(ctx context.Context, kubeConfig *rest.Config, cs kubernetes.Interfa
 				npInfo = NetworkPolicyInfo{Name: newNP.Name, Namespace: newNP.Namespace, Spec: newNP.Spec}
 				if actualCheckNum < cap(ch) {
 					startTimeStamp := time.Now().UnixNano()
-					serverIP, err := selectServerPod(ctx, cs, newNP.Namespace, npInfo)
-					if serverIP != "" && err == nil {
+					serverIP, err := selectServerPod(ctx, cs, ns, npInfo)
+					klog.InfoS("Select server Pod", "serverIP", serverIP, "error", err)
+					if err != nil {
+						klog.ErrorS(err, "selectServerPod")
+						return err
+					}
+					if serverIP != "" {
 						actualCheckNum++
 						go func() {
-							clientPod, err := client_pod.CreateClientPod(ctx, cs, []string{fmt.Sprintf("%s:%d", serverIP, 80)}, "check"+np.Name)
+							clientPod, err := client_pod.CreatePod(ctx, cs, []string{fmt.Sprintf("%s:%d", serverIP, 80)}, client_pod.ScaleClientPodProbeContainer)
 							if err != nil {
 								klog.ErrorS(err, "Create client test Pod failed")
+								return
 							}
 							klog.InfoS("Update test Pod to check NetworkPolicy", "serverIP", serverIP)
 							key := "to down"
-							if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
+							if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, client_pod.ScaleClientPodProbeContainer, ch, startTimeStamp, key); err != nil {
 								klog.ErrorS(err, "Checking the validity the NetworkPolicy error", "ClientPodName", clientPod.Name, "NetworkPolicy", npInfo)
 							}
 						}()
@@ -281,5 +285,5 @@ func selectServerPod(ctx context.Context, cs kubernetes.Interface, ns string, np
 	if toPod.Status.PodIP == "" {
 		return "", fmt.Errorf("podIP is nil, Namespace: %s, Name: %s", toPod.Namespace, toPod.Name)
 	}
-	return
+	return toPod.Status.PodIP, nil
 }

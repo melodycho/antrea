@@ -29,23 +29,32 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, probes []string, containerName string) (*corev1.Pod, error) {
+const (
+	ScaleClientPodServerContainer = "client-pod-server"
+	ScaleClientPodProbeContainer  = "networkpolicy-client-probe"
+)
+
+func CreatePod(ctx context.Context, kClient kubernetes.Interface, probes []string, containerName string) (*corev1.Pod, error) {
 	var err error
 	var newPod *corev1.Pod
 	namespace := ClientPodsNamespace
 	podName := ScaleTestClientPodNamePrefix + uuid.New().String()[:6]
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		newPod.Namespace = namespace
-		newPod.Name = podName
-		newPod.Spec = corev1.PodSpec{
-			Affinity:    &RealNodeAffinity,
-			Tolerations: []corev1.Toleration{MasterToleration},
-			Containers: []corev1.Container{
-				{
-					Name:            ScaleClientContainerName,
-					Image:           "busybox",
-					Command:         []string{"nc", "-lk", "-p", "80"},
-					ImagePullPolicy: corev1.PullIfNotPresent,
+		newPod = &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+			},
+			Spec: corev1.PodSpec{
+				Affinity:    &RealNodeAffinity,
+				Tolerations: []corev1.Toleration{MasterToleration},
+				Containers: []corev1.Container{
+					{
+						Name:            ScaleClientPodServerContainer,
+						Image:           "busybox",
+						Command:         []string{"nc", "-lk", "-p", "80"},
+						ImagePullPolicy: corev1.PullIfNotPresent,
+					},
 				},
 			},
 		}
@@ -85,7 +94,7 @@ func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, probes [
 		return nil, err
 	}
 
-	err = wait.PollImmediate(time.Second, 30, func() (bool, error) {
+	err = wait.PollImmediate(2*time.Second, 60, func() (bool, error) {
 		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, newPod.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
