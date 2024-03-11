@@ -40,9 +40,9 @@ func init() {
 
 func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
-	start := time.Now()
+	// start := time.Now()
 	defer func() {
-		ch <- time.Since(start)
+		// ch <- time.Since(start)
 		res.err = err
 	}()
 	res.scaleNum = data.nodesNum
@@ -91,7 +91,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			"NumberAvailable", ds.Status.NumberAvailable)
 		return ds.Status.DesiredNumberScheduled == ds.Status.NumberAvailable, nil
 	}, ctx.Done())
-	res.actualCheckNum = 1
+	res.actualCheckNum = expectPodNum
 	return
 }
 
