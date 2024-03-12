@@ -170,7 +170,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 						return err
 					}
 				}
-				startTimeStamp := time.Now().UnixNano()
+
 				if newSvc.Spec.ClusterIP == "" {
 					return fmt.Errorf("service %s Spec.ClusterIP is empty", svc.Name)
 				}
@@ -178,6 +178,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				svcs = append(svcs, ServiceInfo{Name: newSvc.Name, IP: newSvc.Spec.ClusterIP, NameSpace: newSvc.Namespace})
 				if shouldCheck {
 					go func() {
+						startTimeStamp := time.Now().UnixNano()
 						key := "to up"
 						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
 							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
