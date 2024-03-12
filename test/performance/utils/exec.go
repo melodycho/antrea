@@ -149,7 +149,7 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 			}
 			select {
 			case ch <- time.Duration(changedTimeStamp - startTime):
-				klog.InfoS("Successfully write in channel")
+				klog.InfoS("Successfully write in channel", "ChangedTimeStamp", changedTimeStamp, "startTime", startTime)
 			default:
 				klog.InfoS("Skipped writing to the channel. No receiver.")
 			}
