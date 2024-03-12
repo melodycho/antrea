@@ -161,6 +161,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 					if err != nil {
 						klog.ErrorS(err, "Create client test Pod failed")
 					}
+					time.Sleep(time.Second)
 				}
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 				if err != nil {
@@ -176,7 +177,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				}
 				klog.InfoS("Create Service", "Name", newSvc.Name, "ClusterIP", newSvc.Spec.ClusterIP, "Namespace", ns)
 				svcs = append(svcs, ServiceInfo{Name: newSvc.Name, IP: newSvc.Spec.ClusterIP, NameSpace: newSvc.Namespace})
-				if shouldCheck {
+				if shouldCheck && clientPod != nil {
 					go func() {
 						startTimeStamp := time.Now().UnixNano()
 						key := "to up"

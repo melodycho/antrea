@@ -87,18 +87,19 @@ func CreateClientPod(ctx context.Context, kClient kubernetes.Interface, namespac
 		return nil, err
 	}
 
-	err = wait.Poll(time.Second, 30, func() (bool, error) {
+	err = wait.PollWithContext(ctx, 3*time.Second, 60*time.Second, func(ctx context.Context) (bool, error) {
 		pod, err := kClient.CoreV1().Pods(namespace).Get(ctx, newPod.Name, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
 
-		if expectContainerNum == len(pod.Spec.Containers) {
+		if expectContainerNum == len(pod.Spec.Containers) && pod.Status.Phase == corev1.PodRunning {
 			return true, nil
 		}
 
 		return false, nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
