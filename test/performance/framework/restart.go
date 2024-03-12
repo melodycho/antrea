@@ -60,6 +60,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	if err != nil {
 		return
 	}
+	startTime := time.Now().UnixNano()
 
 	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var ds *appv1.DaemonSet
@@ -77,7 +78,6 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		return ds.Status.DesiredNumberScheduled == ds.Status.NumberAvailable, nil
 	}, ctx.Done())
 
-	startTime := time.Now().UnixNano()
 	go func() {
 		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
 		if err != nil {
@@ -85,6 +85,9 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			return
 		}
 		for _, pod := range podList.Items {
+			if pod.Status.Phase != v1.PodRunning {
+				continue
+			}
 			key := "to up"
 			if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleAgentProbeContainerName, ch, startTime, key); err != nil {
 				klog.ErrorS(err, "Checking antrea agent restart time error", "ClientPodName", pod.Name)
@@ -149,6 +152,9 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			return
 		}
 		for _, pod := range podList.Items {
+			if pod.Status.Phase != v1.PodRunning {
+				continue
+			}
 			if pod.Spec.NodeName == controllerPod.Spec.NodeName {
 				key := "to up"
 				if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleControllerProbeContainerName, ch, startTime, key); err != nil {
