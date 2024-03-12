@@ -61,21 +61,6 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		return
 	}
 
-	startTime := time.Now().UnixNano()
-	go func() {
-		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
-		if err != nil {
-			err = fmt.Errorf("error when getting scale test client pods: %w", err)
-			return
-		}
-		for _, pod := range podList.Items {
-			key := "to up"
-			if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleAgentProbeContainerName, ch, startTime, key); err != nil {
-				klog.ErrorS(err, "Checking antrea agent restart time error", "ClientPodName", pod.Name)
-			}
-		}
-	}()
-
 	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var ds *appv1.DaemonSet
 		if err := utils.DefaultRetry(func() error {
@@ -91,6 +76,22 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			"NumberAvailable", ds.Status.NumberAvailable)
 		return ds.Status.DesiredNumberScheduled == ds.Status.NumberAvailable, nil
 	}, ctx.Done())
+
+	startTime := time.Now().UnixNano()
+	go func() {
+		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
+		if err != nil {
+			err = fmt.Errorf("error when getting scale test client pods: %w", err)
+			return
+		}
+		for _, pod := range podList.Items {
+			key := "to up"
+			if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleAgentProbeContainerName, ch, startTime, key); err != nil {
+				klog.ErrorS(err, "Checking antrea agent restart time error", "ClientPodName", pod.Name)
+			}
+		}
+	}()
+
 	res.actualCheckNum = expectPodNum
 	return
 }
@@ -127,6 +128,19 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		return
 	}
 	startTime := time.Now().UnixNano()
+
+	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
+		var dp *appv1.Deployment
+		if err := utils.DefaultRetry(func() error {
+			var err error
+			dp, err = data.kubernetesClientSet.AppsV1().Deployments(metav1.NamespaceSystem).Get(ctx, "antrea-controller", metav1.GetOptions{})
+			return err
+		}); err != nil {
+			return false, err
+		}
+		return dp.Status.ObservedGeneration == dp.Generation && dp.Status.ReadyReplicas == *dp.Spec.Replicas, nil
+	}, ctx.Done())
+
 	go func() {
 		controllerPod, err := getControllerPod(data, ctx)
 		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
@@ -144,17 +158,7 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			}
 		}
 	}()
-	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
-		var dp *appv1.Deployment
-		if err := utils.DefaultRetry(func() error {
-			var err error
-			dp, err = data.kubernetesClientSet.AppsV1().Deployments(metav1.NamespaceSystem).Get(ctx, "antrea-controller", metav1.GetOptions{})
-			return err
-		}); err != nil {
-			return false, err
-		}
-		return dp.Status.ObservedGeneration == dp.Generation && dp.Status.ReadyReplicas == *dp.Spec.Replicas, nil
-	}, ctx.Done())
+
 	res.actualCheckNum = 1
 	return
 }
