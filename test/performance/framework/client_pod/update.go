@@ -86,7 +86,7 @@ func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonS
 			return false, nil
 		}
 		klog.InfoS("Waiting the DaemonSets restart", "DaemonSet", ds)
-		if ds.Status.DesiredNumberScheduled != ds.Status.NumberReady {
+		if ds.Status.DesiredNumberScheduled != ds.Status.NumberAvailable {
 			return false, nil
 		}
 		podList, err := kClient.CoreV1().Pods(ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: ScaleClientPodTemplateName})
