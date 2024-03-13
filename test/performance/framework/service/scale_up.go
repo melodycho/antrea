@@ -161,7 +161,6 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 					if err != nil {
 						klog.ErrorS(err, "Create client test Pod failed")
 					}
-					time.Sleep(time.Second)
 				}
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 				if err != nil {
