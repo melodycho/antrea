@@ -30,8 +30,9 @@ import (
 )
 
 const (
-	ScaleClientPodServerContainer = "client-pod-server"
-	ScaleClientPodProbeContainer  = "networkpolicy-client-probe"
+	ScaleClientPodServerContainer          = "client-pod-server"
+	ScaleClientPodProbeContainer           = "networkpolicy-client-probe"
+	ScaleClientPodControllerProbeContainer = "controller-client-probe"
 )
 
 func CreatePod(ctx context.Context, kClient kubernetes.Interface, probes []string, containerName string) (*corev1.Pod, error) {

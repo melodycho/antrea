@@ -119,9 +119,10 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
-	expectPodNum := data.nodesNum - data.simulateNodesNum
-	_, err = client_pod.Update(ctx, data.kubernetesClientSet, client_pod.ClientPodsNamespace, client_pod.ScaleTestClientDaemonSet, []string{prober}, client_pod.ScaleControllerProbeContainerName, expectPodNum)
+	var clientPod *v1.Pod
+	clientPod, err = client_pod.CreatePod(ctx, data.kubernetesClientSet, []string{prober}, client_pod.ScaleClientPodControllerProbeContainer)
 	if err != nil {
+		klog.ErrorS(err, "Create client test Pod failed")
 		return
 	}
 
@@ -147,23 +148,9 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	}, ctx.Done())
 
 	go func() {
-		controllerPod, err := getControllerPod(data, ctx)
-		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
-		if err != nil {
-			klog.ErrorS(err, "error when getting scale test client pods")
-			return
-		}
-		for _, pod := range podList.Items {
-			if pod.Status.Phase != v1.PodRunning {
-				continue
-			}
-			if pod.Spec.NodeName == controllerPod.Spec.NodeName {
-				key := "down to up"
-				if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleControllerProbeContainerName, ch, startTime, key); err != nil {
-					klog.ErrorS(err, "Checking antrea controller restart time error", "ClientPodName", pod.Name)
-				}
-				break
-			}
+		key := "down to up"
+		if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, clientPod.Namespace, clientPod.Name, client_pod.ScaleClientPodControllerProbeContainer, ch, startTime, key); err != nil {
+			klog.ErrorS(err, "Checking antrea controller restart time error", "ClientPodName", clientPod.Name)
 		}
 	}()
 
