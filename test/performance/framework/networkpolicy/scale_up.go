@@ -132,7 +132,7 @@ func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerN
 					actualCheckNum++
 					go func() {
 						klog.InfoS("Update test Pod to check NetworkPolicy", "serverIP", serverIP, "StartTimeStamp", startTimeStamp)
-						key := "to down"
+						key := "up to down"
 						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, client_pod.ScaleClientPodProbeContainer, ch, startTimeStamp, key); err != nil {
 							klog.ErrorS(err, "Checking the validity the NetworkPolicy error", "ClientPodName", clientPod.Name, "NetworkPolicy", npInfo)
 						}

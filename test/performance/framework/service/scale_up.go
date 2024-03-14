@@ -179,7 +179,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				if shouldCheck && clientPod != nil {
 					go func() {
 						startTimeStamp := time.Now().UnixNano()
-						key := "to up"
+						key := "down to up"
 						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
 							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 						}

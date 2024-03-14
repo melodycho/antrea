@@ -100,7 +100,8 @@ func PingIP(ctx context.Context, kubeConfig *rest.Config, kc kubernetes.Interfac
 }
 
 func extractNanoseconds(logEntry, key string) (int64, error) {
-	re := regexp.MustCompile(fmt.Sprintf(`(\d+)\s+Status changed from (unknown|down|up)? %s after`, key))
+	// re := regexp.MustCompile(fmt.Sprintf(`(\d+)\s+Status changed from (unknown|down|up)? %s after`, key))
+	re := regexp.MustCompile(fmt.Sprintf(`(\d+)\s+Status changed from %s after`, key))
 	matches := re.FindStringSubmatch(logEntry)
 
 	if len(matches) < 2 {

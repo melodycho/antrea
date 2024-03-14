@@ -88,7 +88,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			if pod.Status.Phase != v1.PodRunning {
 				continue
 			}
-			key := "to up"
+			key := "down to up"
 			if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleAgentProbeContainerName, ch, startTime, key); err != nil {
 				klog.ErrorS(err, "Checking antrea agent restart time error", "ClientPodName", pod.Name)
 			}
@@ -125,12 +125,14 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		return
 	}
 
+	startTime0 := time.Now().UnixNano()
 	err = data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).
 		DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
 	if err != nil {
 		return
 	}
 	startTime := time.Now().UnixNano()
+	klog.InfoS("Deleting operate time", "Duration(ms)", (startTime-startTime0)/1000000)
 
 	err = wait.PollImmediateUntil(config.WaitInterval, func() (bool, error) {
 		var dp *appv1.Deployment
@@ -156,7 +158,7 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 				continue
 			}
 			if pod.Spec.NodeName == controllerPod.Spec.NodeName {
-				key := "to up"
+				key := "down to up"
 				if err := utils.FetchTimestampFromLog(ctx, data.kubernetesClientSet, pod.Namespace, pod.Name, client_pod.ScaleControllerProbeContainerName, ch, startTime, key); err != nil {
 					klog.ErrorS(err, "Checking antrea controller restart time error", "ClientPodName", pod.Name)
 				}
