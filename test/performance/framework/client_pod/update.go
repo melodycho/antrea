@@ -85,7 +85,9 @@ func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonS
 		if err != nil {
 			return false, nil
 		}
-		klog.InfoS("Waiting the DaemonSets restart", "DaemonSet", ds)
+		if ds.Generation != ds.Status.ObservedGeneration {
+			return false, nil
+		}
 		if ds.Status.DesiredNumberScheduled != ds.Status.NumberAvailable {
 			return false, nil
 		}
@@ -98,7 +100,6 @@ func Update(ctx context.Context, kClient kubernetes.Interface, ns, clientDaemonS
 		}
 		for i := range podList.Items {
 			pod := podList.Items[i]
-			klog.InfoS("Waiting the DaemonSets Pods", "Pod", pod)
 			if pod.DeletionTimestamp != nil || !podutils.IsPodReady(&pod) {
 				return false, nil
 			}

@@ -79,10 +79,6 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	}, ctx.Done())
 
 	go func() {
-		if err := checkPodLog(data, ctx); err != nil {
-			klog.ErrorS(err, "error when checking scale test client pods log")
-			return
-		}
 		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
 		if err != nil {
 			err = fmt.Errorf("error when getting scale test client pods: %w", err)
@@ -101,29 +97,6 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	res.actualCheckNum = expectPodNum
 	return
-}
-
-func checkPodLog(data *ScaleData, ctx context.Context) error {
-	return wait.Poll(time.Second, 60*time.Second, func() (done bool, err error) {
-		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
-		if err != nil {
-			err = fmt.Errorf("error when getting scale test client pods: %w", err)
-			return
-		}
-		klog.InfoS("Checking Pod log", "Pod Items num", len(podList.Items))
-		for _, pod := range podList.Items {
-			req := data.kubernetesClientSet.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &v1.PodLogOptions{
-				Container: client_pod.ScaleClientPodTemplateName,
-			})
-
-			if _, err = req.Stream(ctx); err != nil {
-				klog.ErrorS(err, "error when opening stream to retrieve logs for Pod", "namespace", pod.Namespace, "podName", pod.Name)
-				return false, nil
-			}
-			klog.InfoS("Checking Pod log", "Name", pod.Name, "Namespace", pod.Namespace, "Container", client_pod.ScaleClientPodTemplateName)
-		}
-		return true, nil
-	})
 }
 
 func getControllerPod(data *ScaleData, ctx context.Context) (*v1.Pod, error) {
@@ -172,10 +145,6 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	}, ctx.Done())
 
 	go func() {
-		if err := checkPodLog(data, ctx); err != nil {
-			klog.ErrorS(err, "error when checking scale test client pods log")
-			return
-		}
 		controllerPod, err := getControllerPod(data, ctx)
 		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
 		if err != nil {
