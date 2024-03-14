@@ -145,8 +145,9 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 			if err != nil {
 				return false, err
 			}
-			if time.Duration(time.Now().UnixNano()-changedTimeStamp) > 8*time.Hour {
-				return false, fmt.Errorf("timestamp fetch from the client Pod log is invalid, please check")
+			if time.Duration(changedTimeStamp-startTime) < 0 {
+				klog.ErrorS(nil, "timestamp fetch from the client Pod log is invalid, please check", "startTime", startTime, "chengedTime", changedTimeStamp)
+				return false, nil
 			}
 			select {
 			case ch <- time.Duration(changedTimeStamp - startTime):

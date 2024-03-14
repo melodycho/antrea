@@ -162,6 +162,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 						klog.ErrorS(err, "Create client test Pod failed")
 					}
 				}
+				startTime0 := time.Now().UnixNano()
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
 				if err != nil {
 					if errors.IsAlreadyExists(err) {
@@ -179,6 +180,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				if shouldCheck && clientPod != nil {
 					go func() {
 						startTimeStamp := time.Now().UnixNano()
+						klog.InfoS("Service creating operate time", "Duration(ms)", (startTimeStamp-startTime0)/1000000)
 						key := "down to up"
 						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
 							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)

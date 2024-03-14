@@ -10,9 +10,6 @@ skip_deploy_workload: false
 teardown: false
 check_timeout: 20
 scales:
-  - name: "ScaleRestartAgent"
-    package: "test/performance/framework"
-    repeat_times: 1
   - name: "ScaleUpWorkloadPods"
     package: "test/performance/framework"
     repeat_times: 1
@@ -28,12 +25,6 @@ scales:
   - name: "ScaleNetworkPolicy"
     package: "test/performance/framework"
     repeat_times: 1
-  - name: "ScaleRestartAgent"
-    package: "test/performance/framework"
-    repeat_times: 0
-  - name: "RestartController"
-    package: "test/performance/framework"
-    repeat_times: 0
   - name: "ScaleServiceDemo"
     package: "test/performance/framework"
     repeat_times: 0

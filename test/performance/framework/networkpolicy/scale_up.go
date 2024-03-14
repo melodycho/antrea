@@ -119,6 +119,7 @@ func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerN
 				}
 			}
 			if err := utils.DefaultRetry(func() error {
+				startTime0 := time.Now().UnixNano()
 				_, err := cs.NetworkingV1().NetworkPolicies(ns).Create(ctx, np, metav1.CreateOptions{})
 				if err != nil {
 					if errors.IsAlreadyExists(err) {
@@ -129,6 +130,7 @@ func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerN
 				}
 				if shouldCheck && clientPod != nil && serverIP != "" {
 					startTimeStamp := time.Now().UnixNano()
+					klog.InfoS("Networkpolicy creating operate time", "Duration(ms)", (startTimeStamp-startTime0)/1000000)
 					actualCheckNum++
 					go func() {
 						klog.InfoS("Update test Pod to check NetworkPolicy", "serverIP", serverIP, "StartTimeStamp", startTimeStamp)
