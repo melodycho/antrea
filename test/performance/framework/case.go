@@ -118,7 +118,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	}
 
 	rows = append(rows, table.GenerateRow(caseName, res, time.Since(startTime).String(),
-		avg.String(), maxRes.String(), minRes.String(), strconv.Itoa(actualCheckNum), strconv.Itoa(scaleNum)))
+		avg.String(), maxRes.String(), minRes.String(), strconv.Itoa(scaleNum)))
 	table.ShowResult(os.Stdout, rows)
 	return nil
 }

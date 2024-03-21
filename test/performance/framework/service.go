@@ -20,33 +20,20 @@ import (
 	"fmt"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
-	"antrea.io/antrea/test/performance/framework/client_pod"
 	"antrea.io/antrea/test/performance/framework/service"
 )
 
 func init() {
 	RegisterFunc("ScaleService", ScaleService)
-	RegisterFunc("ScaleServiceDemo", ScaleServiceDemo)
 }
 
 func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
 
-	clientPods, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
-	if err != nil {
-		res.err = fmt.Errorf("list client Pod error: %+v", err)
-		return
-	}
-
-	klog.InfoS("client Pods", "Pod num", len(clientPods.Items))
-
-	var actualCheckNum int
 	var svcs []service.ServiceInfo
-	svcs, actualCheckNum, err = service.ScaleUp(ctx, data.provider, data.controlPlaneNodes[0], data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, ch)
+	svcs, err = service.ScaleUp(ctx, data.provider, data.controlPlaneNodes[0], data.kubernetesClientSet, data.namespaces, data.Specification.SvcNumPerNs, data.Specification.IPv6, ch)
 	if err != nil {
 		res.err = fmt.Errorf("scale up services error: %v", err)
 		return
@@ -56,7 +43,7 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 	defer func() {
 		res.err = err
 		for {
-			if len(ch) == res.actualCheckNum {
+			if len(ch) == res.scaleNum {
 				break
 			}
 			klog.InfoS("Waiting the check goroutine finish")
@@ -67,27 +54,5 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 		}
 	}()
 
-	res.actualCheckNum = actualCheckNum
-	return
-}
-
-func ScaleServiceDemo(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
-	var err error
-	defer func() {
-		res.err = err
-	}()
-	start := time.Now()
-	var nss *v1.NamespaceList
-	nss, err = data.kubernetesClientSet.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return
-	}
-	klog.InfoS("List all test namespace", "namespacesNum", len(nss.Items))
-	klog.V(2).InfoS("level 2 log")
-	klog.V(1).InfoS("level 1 log")
-	for i := 0; i < data.maxCheckNum; i++ {
-		ch <- time.Since(start)
-	}
-	res.actualCheckNum = data.maxCheckNum
 	return
 }

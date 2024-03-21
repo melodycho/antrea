@@ -18,10 +18,10 @@ package framework
 import (
 	"context"
 	"fmt"
-	v1 "k8s.io/api/core/v1"
 	"time"
 
 	appv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -40,9 +40,7 @@ func init() {
 
 func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
-	// start := time.Now()
 	defer func() {
-		// ch <- time.Since(start)
 		res.err = err
 	}()
 	res.scaleNum = data.nodesNum
@@ -85,7 +83,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 			return
 		}
 		for _, pod := range podList.Items {
-			if pod.Status.Phase != v1.PodRunning {
+			if pod.Status.Phase != corev1.PodRunning {
 				continue
 			}
 			key := "down to up"
@@ -99,17 +97,6 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	return
 }
 
-func getControllerPod(data *ScaleData, ctx context.Context) (*v1.Pod, error) {
-	controllerPods, err := data.kubernetesClientSet.CoreV1().Pods(metav1.NamespaceSystem).List(ctx, metav1.ListOptions{LabelSelector: "app=antrea,component=antrea-controller"})
-	if err != nil {
-		return nil, err
-	}
-	if len(controllerPods.Items) < 1 {
-		return nil, fmt.Errorf("no Antrea Controller Pods")
-	}
-	return &controllerPods.Items[0], nil
-}
-
 func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
 	res.scaleNum = 1
@@ -119,7 +106,7 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
-	var clientPod *v1.Pod
+	var clientPod *corev1.Pod
 	clientPod, err = client_pod.CreatePod(ctx, data.kubernetesClientSet, []string{prober}, client_pod.ScaleClientPodControllerProbeContainer)
 	if err != nil {
 		klog.ErrorS(err, "Create client test Pod failed")

@@ -15,8 +15,10 @@
 package service
 
 import (
+	utils2 "antrea.io/antrea/test/performance/framework/utils"
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/runtime"
 	"net"
 	"regexp"
 	"strings"
@@ -35,26 +37,13 @@ import (
 	"antrea.io/antrea/test/performance/utils"
 )
 
-var svcCIDRIPv4 = "10.100.100."
-
-func generateService(ns string, num int) (svcs []*corev1.Service) {
+func renderServices(service *corev1.Service, num int) (svcs []*corev1.Service) {
 	for i := 0; i < num; i++ {
 		labelNum := i/2 + 1
-		svc := &corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: fmt.Sprintf("antrea-scale-svc-%d-%s", i, uuid.New().String()),
-			},
-			Spec: corev1.ServiceSpec{
-				Selector: map[string]string{
-					fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
-				},
-				Ports: []corev1.ServicePort{
-					{
-						Protocol: corev1.ProtocolTCP,
-						Port:     80,
-					},
-				},
-			},
+		svc := service
+		svc.Name = fmt.Sprintf("antrea-scale-svc-%d-%s", i, uuid.New().String())
+		svc.Spec.Selector = map[string]string{
+			fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
 		}
 		svcs = append(svcs, svc)
 	}
@@ -107,7 +96,7 @@ func retrieveCIDRs(provider providers.ProviderInterface, controlPlaneNodeName st
 	return res, nil
 }
 
-func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlPlaneNodeName string, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool, ch chan time.Duration) (svcs []ServiceInfo, actualCheckNum int, err error) {
+func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlPlaneNodeName string, cs kubernetes.Interface, nss []string, numPerNs int, ipv6 bool, ch chan time.Duration) (svcs []ServiceInfo, err error) {
 	start := time.Now()
 
 	var svcCIDRs []string
@@ -123,9 +112,22 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 	}
 
 	klog.InfoS("retrieveCIDRs", "svcCIDRs", svcCIDRs)
-	svcCIDRIPv4 = svcCIDRs[0]
+	svcCIDRIPv4 := svcCIDRs[0]
 	_, ipNet, _ := net.ParseCIDR(svcCIDRIPv4)
 	allocator, err := ipallocator.NewCIDRAllocator(ipNet, []net.IP{net.ParseIP("10.96.0.1"), net.ParseIP("10.96.0.10")})
+
+	var obj runtime.Object
+	obj, err = utils2.ReadYamlFile("service.yaml")
+	if err != nil {
+		err = fmt.Errorf("error reading Service template: %+v", err)
+		return
+	}
+
+	service, ok := obj.(*corev1.Service)
+	if !ok {
+		err = fmt.Errorf("error converting to Unstructured: %+v", "the template file is nil")
+		return
+	}
 
 	for _, ns := range nss {
 		klog.InfoS("Scale up Services", "Namespace", ns)
@@ -135,7 +137,7 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 		if err != nil {
 			return
 		}
-		for _, svc := range generateService(ns, numPerNs) {
+		for _, svc := range renderServices(service, numPerNs) {
 			if ipv6 {
 				ipFamily := corev1.IPv6Protocol
 				svc.Spec.IPFamilies = []corev1.IPFamily{ipFamily}
@@ -151,16 +153,13 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				var err error
 				var clientPod *corev1.Pod
 				svc.Spec.ClusterIP = clusterIP.String()
-				klog.InfoS("go FetchTimestampFromLog", "actualCheckNum", actualCheckNum, "cap(ch)", cap(ch))
-				shouldCheck := actualCheckNum < cap(ch)
-				if shouldCheck {
-					actualCheckNum++
-					fromPod := &podList.Items[testPodIndex%len(podList.Items)]
-					testPodIndex++
-					clientPod, err = workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleTestPodProbeContainerName)
-					if err != nil {
-						klog.ErrorS(err, "Create client test Pod failed")
-					}
+				klog.InfoS("go FetchTimestampFromLog", "cap(ch)", cap(ch))
+				fromPod := &podList.Items[testPodIndex%len(podList.Items)]
+				testPodIndex++
+				clientPod, err = workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleTestPodProbeContainerName)
+				if err != nil || clientPod == nil {
+					klog.ErrorS(err, "Create client test Pod failed, can not verify the Service, will exist")
+					return err
 				}
 				startTime0 := time.Now().UnixNano()
 				newSvc, err = cs.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
@@ -177,20 +176,18 @@ func ScaleUp(ctx context.Context, provider providers.ProviderInterface, controlP
 				}
 				klog.InfoS("Create Service", "Name", newSvc.Name, "ClusterIP", newSvc.Spec.ClusterIP, "Namespace", ns)
 				svcs = append(svcs, ServiceInfo{Name: newSvc.Name, IP: newSvc.Spec.ClusterIP, NameSpace: newSvc.Namespace})
-				if shouldCheck && clientPod != nil {
-					go func() {
-						startTimeStamp := time.Now().UnixNano()
-						klog.InfoS("Service creating operate time", "Duration(ms)", (startTimeStamp-startTime0)/1000000)
-						key := "down to up"
-						if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
-							klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
-						}
-						klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
-					}()
-				}
+				go func() {
+					startTimeStamp := time.Now().UnixNano()
+					klog.InfoS("Service creating operate time", "Duration(ms)", (startTimeStamp-startTime0)/1000000)
+					key := "down to up"
+					if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
+						klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
+					}
+					klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)
+				}()
 				return nil
 			}); err != nil {
-				return nil, 0, err
+				return nil, err
 			}
 			time.Sleep(time.Duration(utils.GenRandInt()%2000) * time.Millisecond)
 		}

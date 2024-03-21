@@ -25,6 +25,3 @@ scales:
   - name: "ScaleNetworkPolicy"
     package: "test/performance/framework"
     repeat_times: 1
-  - name: "ScaleServiceDemo"
-    package: "test/performance/framework"
-    repeat_times: 0
