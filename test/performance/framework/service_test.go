@@ -1,4 +1,4 @@
-package service
+package framework
 
 import (
 	utils2 "antrea.io/antrea/test/performance/framework/utils"

@@ -50,6 +50,7 @@ type ScaleData struct {
 	checkTimeout        time.Duration
 	controlPlaneNodes   []string
 	provider            providers.ProviderInterface
+	templateFilesPath   string
 }
 
 func createTestPodClients(ctx context.Context, kClient kubernetes.Interface, ns string) error {
@@ -120,7 +121,7 @@ func validScaleSpecification(c *config.ScaleConfiguration) error {
 	return nil
 }
 
-func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*ScaleData, error) {
+func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath, templateFilesPath string) (*ScaleData, error) {
 	var td ScaleData
 	scaleConfig, err := config.ParseConfigs(scaleConfigPath)
 	if err != nil {
@@ -128,6 +129,8 @@ func ScaleUp(ctx context.Context, kubeConfigPath, scaleConfigPath string) (*Scal
 	}
 	klog.InfoS("Scale config", "scaleConfig", scaleConfig)
 	td.Specification = scaleConfig
+
+	td.templateFilesPath = templateFilesPath
 
 	if err := validScaleSpecification(&scaleConfig.ScaleConfiguration); err != nil {
 		return nil, err
