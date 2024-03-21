@@ -59,7 +59,7 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 	defer func() {
 		res.err = err
 		for {
-			if len(ch) == res.scaleNum {
+			if len(ch) == cap(svcs) {
 				break
 			}
 			klog.InfoS("Waiting the check goroutine finish")
@@ -205,7 +205,7 @@ func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs 
 				var err error
 				var clientPod *corev1.Pod
 				svc.Spec.ClusterIP = clusterIP.String()
-				klog.InfoS("go FetchTimestampFromLog", "cap(ch)", cap(ch))
+				klog.InfoS("go FetchTimestampFromLog", "cap(ch)", cap(ch), "len(ch)", len(ch))
 				fromPod := &podList.Items[testPodIndex%len(podList.Items)]
 				testPodIndex++
 				clientPod, err = workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleTestPodProbeContainerName)

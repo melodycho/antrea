@@ -69,10 +69,10 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 
 	startTime := time.Now()
 	caseName := ctx.Value(CtxScaleCaseName).(string)
-	testData.maxCheckNum = testData.nodesNum * 10
+	testData.maxCheckNum = 10000
 	ress := make(chan time.Duration, testData.maxCheckNum)
 	res := "failed"
-	actualCheckNum := 0
+	// actualCheckNum := 0
 	scaleNum := 0
 	defer func() {
 		close(ress)
@@ -91,7 +91,7 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 		if err != nil {
 			return err.(error)
 		}
-		actualCheckNum = scaleRes.actualCheckNum
+		// actualCheckNum = scaleRes.actualCheckNum
 		scaleNum = scaleRes.scaleNum
 		res = "success"
 	}
@@ -99,7 +99,8 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	var rows [][]string
 	var total, minRes, maxRes, avg time.Duration
 	count := 0
-	for i := 0; i < actualCheckNum; i++ {
+	chLen := len(ress)
+	for i := 0; i < chLen; i++ {
 		res := <-ress
 		total += res
 		count++
