@@ -16,9 +16,12 @@ package framework
 
 //goland:noinspection ALL
 import (
+	"bytes"
 	"context"
 	"fmt"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"net"
+	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -28,14 +31,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/ipam/ipallocator"
 	"antrea.io/antrea/test/e2e/providers"
 	"antrea.io/antrea/test/performance/config"
-	utils2 "antrea.io/antrea/test/performance/framework/utils"
 	"antrea.io/antrea/test/performance/framework/workload_pod"
 	"antrea.io/antrea/test/performance/utils"
 )
@@ -75,7 +76,7 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 func renderServices(service *corev1.Service, num int) (svcs []*corev1.Service) {
 	for i := 0; i < num; i++ {
 		labelNum := i/2 + 1
-		svc := service
+		svc := &corev1.Service{Spec: service.Spec}
 		svc.Name = fmt.Sprintf("antrea-scale-svc-%d-%s", i, uuid.New().String())
 		svc.Spec.Selector = map[string]string{
 			fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
@@ -131,6 +132,22 @@ func retrieveCIDRs(provider providers.ProviderInterface, controlPlaneNodeName st
 	return res, nil
 }
 
+func unmarshallService(yamlFile string) (*corev1.Service, error) {
+	klog.InfoS("ReadYamlFile", "yamlFile", yamlFile)
+	podBytes, err := os.ReadFile(yamlFile)
+	if err != nil {
+		return nil, fmt.Errorf("error reading YAML file: %+v", err)
+	}
+	service := &corev1.Service{}
+
+	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(podBytes), 100)
+
+	if err := decoder.Decode(service); err != nil {
+		return nil, fmt.Errorf("error decoding YAML file: %+v", err)
+	}
+	return service, nil
+}
+
 func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs []ServiceInfo, err error) {
 	provider := data.provider
 	controlPlaneNodeName := data.controlPlaneNodes[0]
@@ -157,16 +174,10 @@ func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs 
 	_, ipNet, _ := net.ParseCIDR(svcCIDRIPv4)
 	allocator, err := ipallocator.NewCIDRAllocator(ipNet, []net.IP{net.ParseIP("10.96.0.1"), net.ParseIP("10.96.0.10")})
 
-	var obj runtime.Object
-	obj, err = utils2.ReadYamlFile(path.Join(data.templateFilesPath, "service/service.yaml"))
+	var service *corev1.Service
+	service, err = unmarshallService(path.Join(data.templateFilesPath, "service/service.yaml"))
 	if err != nil {
 		err = fmt.Errorf("error reading Service template: %+v", err)
-		return
-	}
-
-	service, ok := obj.(*corev1.Service)
-	if !ok {
-		err = fmt.Errorf("error converting to Unstructured: %+v", "the template file is nil")
 		return
 	}
 
