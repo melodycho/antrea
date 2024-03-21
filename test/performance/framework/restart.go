@@ -40,9 +40,6 @@ func init() {
 
 func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
 	var err error
-	defer func() {
-		res.err = err
-	}()
 	res.scaleNum = data.nodesNum
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaAgentAPIPort)
@@ -93,6 +90,18 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 		}
 	}()
 
+	defer func() {
+		res.err = err
+		for {
+			klog.InfoS("Waiting the check goroutine finish", "expectPodNum", expectPodNum, "len(ch)", len(ch))
+			if len(ch) == expectPodNum {
+				break
+			}
+			klog.InfoS("Waiting the check goroutine finish")
+			time.Sleep(time.Second)
+		}
+	}()
+
 	res.actualCheckNum = expectPodNum
 	return
 }
@@ -102,6 +111,14 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	res.scaleNum = 1
 	defer func() {
 		res.err = err
+		for {
+			klog.InfoS("Waiting the check goroutine finish", "len(ch)", len(ch))
+			if len(ch) == 1 {
+				break
+			}
+			klog.InfoS("Waiting the check goroutine finish")
+			time.Sleep(time.Second)
+		}
 	}()
 
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
