@@ -59,7 +59,7 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 	defer func() {
 		res.err = err
 		for {
-			klog.InfoS("Waiting the check goroutine finish", "len(svcs)", len(svcs), "cap(svcs)", cap(svcs))
+			klog.InfoS("Waiting the check goroutine finish", "len(svcs)", len(svcs))
 			if len(ch) == len(svcs) {
 				break
 			}
