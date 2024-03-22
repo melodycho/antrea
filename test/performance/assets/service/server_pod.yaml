@@ -9,7 +9,7 @@ spec:
     - -f
     image: busybox
     imagePullPolicy: IfNotPresent
-    name: antrea-scale-test-client
+    name: antrea-scale-test-server
     resources:
       limits:
         cpu: 20m

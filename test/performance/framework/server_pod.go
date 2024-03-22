@@ -15,14 +15,17 @@
 package framework
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
+	"os"
+	"path"
 	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -41,62 +44,48 @@ const (
 	workloadPodLabelValue = ""
 )
 
-var (
-	workloadPodContainer = corev1.Container{
-		Name:            client_pod.ScaleClientContainerName,
-		Image:           "busybox",
-		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{"httpd", "-f"},
-		Resources: corev1.ResourceRequirements{
-			Limits: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("64Mi"),
-				corev1.ResourceCPU:    resource.MustParse("20m"),
-			},
-			Requests: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("32Mi"),
-				corev1.ResourceCPU:    resource.MustParse("10m"),
-			},
-		},
+func unmarshallServerPod(yamlFile string) (*corev1.Pod, error) {
+	klog.InfoS("ReadYamlFile", "yamlFile", yamlFile)
+	podBytes, err := os.ReadFile(yamlFile)
+	if err != nil {
+		return nil, fmt.Errorf("error reading YAML file: %+v", err)
 	}
-)
+	pod := &corev1.Pod{}
 
-func workloadPodTemplate(podName, ns string, labels map[string]string, onRealNode bool) *corev1.Pod {
-	var affinity *corev1.Affinity
-	var tolerations []corev1.Toleration
-	if onRealNode {
-		affinity = &client_pod.RealNodeAffinity
-		tolerations = append(tolerations, client_pod.MasterToleration)
-	} else {
-		affinity = &client_pod.SimulateAffinity
-		tolerations = append(tolerations, client_pod.SimulateToleration)
+	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(podBytes), 100)
+
+	if err := decoder.Decode(pod); err != nil {
+		return nil, fmt.Errorf("error decoding YAML file: %+v", err)
 	}
-	labels[workloadPodLabelKey] = workloadPodLabelValue
-	labels["name"] = podName
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: ns,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Affinity:      affinity,
-			Containers:    []corev1.Container{workloadPodContainer},
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
-		},
-	}
+	return pod, nil
 }
 
-func newWorkloadPod(podName, ns string, onRealNode bool, labelNum int) *corev1.Pod {
-	labels := map[string]string{
-		client_pod.AppLabelKey: client_pod.AppLabelValue,
-		"namespace":            ns,
-		fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
+func renderServerPods(templatePath string, ns string, num, serviceNum int) (serverPods []*corev1.Pod, err error) {
+	yamlFile := path.Join(templatePath, "service/server_pod.yaml")
+	podTemplate, err := unmarshallServerPod(yamlFile)
+	if err != nil {
+		err = fmt.Errorf("error reading Service template: %+v", err)
+		return
 	}
-	if onRealNode {
-		labels[utils.PodOnRealNodeLabelKey] = ""
+
+	for i := 0; i < num; i++ {
+		labelNum := i % serviceNum
+		podName := fmt.Sprintf("antrea-scale-test-pod-server-%s", uuid.New().String()[:8])
+		serverPod := &corev1.Pod{Spec: podTemplate.Spec}
+		serverPod.Name = podName
+		serverPod.Namespace = ns
+		serverPod.Labels = map[string]string{
+			"name":                      podName,
+			utils.PodOnRealNodeLabelKey: "",
+			client_pod.AppLabelKey:      client_pod.AppLabelValue,
+			workloadPodLabelKey:         workloadPodLabelValue,
+			fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
+		}
+		serverPod.Spec.Affinity = &client_pod.RealNodeAffinity
+		serverPods = append(serverPods, serverPod)
 	}
-	return workloadPodTemplate(podName, ns, labels, onRealNode)
+
+	return
 }
 
 func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *ScaleData) (res ScaleResult) {
@@ -112,27 +101,25 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 	start := time.Now()
 	podNum := data.Specification.PodsNumPerNs
 	res.scaleNum = len(data.namespaces) * podNum
+	serviceNumPerNs := data.Specification.SvcNumPerNs
 	count := 0
 	for _, ns := range data.namespaces {
 		gErr, _ := errgroup.WithContext(context.Background())
-		for i := 0; i < podNum; i++ {
-			// index := i
-			time.Sleep(time.Duration(utils.GenRandInt()%100) * time.Millisecond)
-			labelNum := i/2 + 1
+		var pods []*corev1.Pod
+		pods, err = renderServerPods(data.templateFilesPath, ns, podNum, serviceNumPerNs)
+		if err != nil {
+			return
+		}
+		for i, _ := range pods {
+			pod := pods[i]
 			gErr.Go(func() error {
-				podName := fmt.Sprintf("antrea-scale-test-pod-server-%s", uuid.New().String()[:8])
-				pod := newWorkloadPod(podName, ns, true, labelNum)
-				// if !data.Specification.RealNode {
-				// 	onRealNode := (index % data.nodesNum) >= data.simulateNodesNum
-				// 	pod = newWorkloadPod(podName, ns, onRealNode, labelNum)
-				// }
 				if _, err := data.kubernetesClientSet.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 					return err
 				}
 				return nil
 			})
 		}
-		klog.V(2).InfoS("Create workload Pods", "PodNum", podNum, "Namespace", ns)
+		klog.V(2).InfoS("Create workload Pods", "PodNum", podNum, "Namespace", ns, "Pods", len(pods))
 		if err = gErr.Wait(); err != nil {
 			return
 		}

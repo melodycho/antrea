@@ -112,7 +112,7 @@ func ScaleUp(ctx context.Context, cs kubernetes.Interface, nss []string, numPerN
 					klog.ErrorS(err, "selectServerPod")
 					return 0, fmt.Errorf("select server Pod error: %+v", err)
 				}
-				clientPod, err = client_pod.CreatePod(ctx, cs, []string{fmt.Sprintf("%s:%d", serverIP, 80)}, client_pod.ScaleClientPodProbeContainer)
+				clientPod, err = client_pod.CreatePod(ctx, cs, []string{fmt.Sprintf("%s:%d", serverIP, 80)}, client_pod.ScaleClientPodProbeContainer, client_pod.ClientPodsNamespace)
 				if err != nil {
 					klog.ErrorS(err, "Create client test Pod failed")
 					return 0, fmt.Errorf("create client test Pod failed: %+v", err)

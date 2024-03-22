@@ -16,6 +16,7 @@ package framework
 
 //goland:noinspection ALL
 import (
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"bytes"
 	"context"
 	"fmt"
@@ -37,7 +38,6 @@ import (
 	"antrea.io/antrea/pkg/ipam/ipallocator"
 	"antrea.io/antrea/test/e2e/providers"
 	"antrea.io/antrea/test/performance/config"
-	"antrea.io/antrea/test/performance/framework/workload_pod"
 	"antrea.io/antrea/test/performance/utils"
 )
 
@@ -71,19 +71,6 @@ func ScaleService(ctx context.Context, ch chan time.Duration, data *ScaleData) (
 		}
 	}()
 
-	return
-}
-
-func renderServices(service *corev1.Service, num int) (svcs []*corev1.Service) {
-	for i := 0; i < num; i++ {
-		labelNum := i/2 + 1
-		svc := &corev1.Service{Spec: service.Spec}
-		svc.Name = fmt.Sprintf("antrea-scale-svc-%d-%s", i, uuid.New().String())
-		svc.Spec.Selector = map[string]string{
-			fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, labelNum): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, labelNum),
-		}
-		svcs = append(svcs, svc)
-	}
 	return
 }
 
@@ -149,6 +136,26 @@ func unmarshallService(yamlFile string) (*corev1.Service, error) {
 	return service, nil
 }
 
+func renderServices(templatePath string, num int) (svcs []*corev1.Service, err error) {
+	yamlFile := path.Join(templatePath, "service/service.yaml")
+	var service *corev1.Service
+	service, err = unmarshallService(yamlFile)
+	if err != nil {
+		err = fmt.Errorf("error reading Service template: %+v", err)
+		return nil, err
+	}
+
+	for i := 0; i < num; i++ {
+		svc := &corev1.Service{Spec: service.Spec}
+		svc.Name = fmt.Sprintf("antrea-scale-svc-%d-%s", i, uuid.New().String())
+		svc.Spec.Selector = map[string]string{
+			fmt.Sprintf("%s%d", utils.SelectorLabelKeySuffix, i): fmt.Sprintf("%s%d", utils.SelectorLabelValueSuffix, i),
+		}
+		svcs = append(svcs, svc)
+	}
+	return
+}
+
 func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs []ServiceInfo, err error) {
 	provider := data.provider
 	controlPlaneNodeName := data.controlPlaneNodes[0]
@@ -175,22 +182,14 @@ func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs 
 	_, ipNet, _ := net.ParseCIDR(svcCIDRIPv4)
 	allocator, err := ipallocator.NewCIDRAllocator(ipNet, []net.IP{net.ParseIP("10.96.0.1"), net.ParseIP("10.96.0.10")})
 
-	var service *corev1.Service
-	service, err = unmarshallService(path.Join(data.templateFilesPath, "service/service.yaml"))
-	if err != nil {
-		err = fmt.Errorf("error reading Service template: %+v", err)
-		return
-	}
-
 	for _, ns := range nss {
 		klog.InfoS("Scale up Services", "Namespace", ns)
-		testPodIndex := 0
-		var podList *corev1.PodList
-		podList, err = cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+		var services []*corev1.Service
+		services, err = renderServices(data.templateFilesPath, numPerNs)
 		if err != nil {
 			return
 		}
-		for _, svc := range renderServices(service, numPerNs) {
+		for _, svc := range services {
 			if ipv6 {
 				ipFamily := corev1.IPv6Protocol
 				svc.Spec.IPFamilies = []corev1.IPFamily{ipFamily}
@@ -207,9 +206,7 @@ func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs 
 				var clientPod *corev1.Pod
 				svc.Spec.ClusterIP = clusterIP.String()
 				klog.InfoS("go FetchTimestampFromLog", "cap(ch)", cap(ch), "len(ch)", len(ch))
-				fromPod := &podList.Items[testPodIndex%len(podList.Items)]
-				testPodIndex++
-				clientPod, err = workload_pod.CreateClientPod(ctx, cs, fromPod.Namespace, fromPod.Name, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, workload_pod.ScaleTestPodProbeContainerName)
+				clientPod, err = client_pod.CreatePod(ctx, cs, []string{fmt.Sprintf("%s:%d", clusterIP, 80)}, client_pod.ScaleTestPodProbeContainerName, ns)
 				if err != nil || clientPod == nil {
 					klog.ErrorS(err, "Create client test Pod failed, can not verify the Service, will exist")
 					return err
@@ -233,7 +230,7 @@ func scaleUp(ctx context.Context, data *ScaleData, ch chan time.Duration) (svcs 
 					startTimeStamp := time.Now().UnixNano()
 					klog.InfoS("Service creating operate time", "Duration(ms)", (startTimeStamp-startTime0)/1000000)
 					key := "down to up"
-					if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, workload_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
+					if err := utils.FetchTimestampFromLog(ctx, cs, clientPod.Namespace, clientPod.Name, client_pod.ScaleTestPodProbeContainerName, ch, startTimeStamp, key); err != nil {
 						klog.ErrorS(err, "Check readiness of service error", "ClientPodName", clientPod.Name, "svc", svc)
 					}
 					klog.InfoS("Update test Pod to check Service", "ClusterIP", clusterIP)

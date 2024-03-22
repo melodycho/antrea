@@ -124,7 +124,7 @@ func RestartController(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	prober := fmt.Sprintf("%s:%d", "", antreaapis.AntreaControllerAPIPort)
 
 	var clientPod *corev1.Pod
-	clientPod, err = client_pod.CreatePod(ctx, data.kubernetesClientSet, []string{prober}, client_pod.ScaleClientPodControllerProbeContainer)
+	clientPod, err = client_pod.CreatePod(ctx, data.kubernetesClientSet, []string{prober}, client_pod.ScaleClientPodControllerProbeContainer, client_pod.ClientPodsNamespace)
 	if err != nil {
 		klog.ErrorS(err, "Create client test Pod failed")
 		return
