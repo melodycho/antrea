@@ -72,7 +72,6 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 	testData.maxCheckNum = 10000
 	ress := make(chan time.Duration, testData.maxCheckNum)
 	res := "failed"
-	// actualCheckNum := 0
 	scaleNum := 0
 	defer func() {
 		close(ress)
@@ -91,7 +90,6 @@ func (c *ScaleTestCase) Run(ctx context.Context, testData *ScaleData) error {
 		if err != nil {
 			return err.(error)
 		}
-		// actualCheckNum = scaleRes.actualCheckNum
 		scaleNum = scaleRes.scaleNum
 		res = "success"
 	}

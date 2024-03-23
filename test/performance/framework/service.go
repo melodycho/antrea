@@ -14,13 +14,10 @@
 
 package framework
 
-//goland:noinspection ALL
 import (
-	"antrea.io/antrea/test/performance/framework/client_pod"
 	"bytes"
 	"context"
 	"fmt"
-	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"net"
 	"os"
 	"path"
@@ -33,11 +30,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/ipam/ipallocator"
 	"antrea.io/antrea/test/e2e/providers"
 	"antrea.io/antrea/test/performance/config"
+	"antrea.io/antrea/test/performance/framework/client_pod"
 	"antrea.io/antrea/test/performance/utils"
 )
 

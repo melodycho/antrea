@@ -76,7 +76,7 @@ func ScaleRestartAgent(ctx context.Context, ch chan time.Duration, data *ScaleDa
 	go func() {
 		podList, err := data.kubernetesClientSet.CoreV1().Pods(client_pod.ClientPodsNamespace).List(ctx, metav1.ListOptions{LabelSelector: client_pod.ScaleClientPodTemplateName})
 		if err != nil {
-			err = fmt.Errorf("error when getting scale test client pods: %w", err)
+			klog.ErrorS(err, "error when getting scale test client pods")
 			return
 		}
 		for _, pod := range podList.Items {

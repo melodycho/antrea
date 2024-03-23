@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"k8s.io/klog/v2"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -32,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/performance/framework/client_pod"
 )

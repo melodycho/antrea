@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"os"
 	"path"
 	"time"
@@ -28,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/test/performance/config"
@@ -110,7 +110,7 @@ func ScaleUpWorkloadPods(ctx context.Context, ch chan time.Duration, data *Scale
 		if err != nil {
 			return
 		}
-		for i, _ := range pods {
+		for i := range pods {
 			pod := pods[i]
 			gErr.Go(func() error {
 				if _, err := data.kubernetesClientSet.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
