@@ -139,7 +139,7 @@ func FetchTimestampFromLog(ctx context.Context, kc kubernetes.Interface, namespa
 		if _, err := io.Copy(&b, podLogs); err != nil {
 			return false, fmt.Errorf("error when copying logs for Pod '%s/%s': %w", namespace, podName, err)
 		}
-		klog.InfoS("GetLogs from probe container", "podName", podName, "namespace", namespace, "logs", b.String())
+		klog.V(4).InfoS("GetLogs from probe container", "podName", podName, "namespace", namespace, "logs", b.String())
 		if strings.Contains(b.String(), key) {
 			changedTimeStamp, err := extractNanoseconds(b.String(), key)
 			if err != nil {

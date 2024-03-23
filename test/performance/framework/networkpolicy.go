@@ -88,7 +88,7 @@ func unmarshallNetworkPolicy(yamlFile string) (*netv1.NetworkPolicy, error) {
 }
 
 func renderNetworkPolicies(templatePath string, ns string, num int) (nps []*netv1.NetworkPolicy, err error) {
-	yamlFile := path.Join(templatePath, "service/networkpolicy.yaml")
+	yamlFile := path.Join(templatePath, "networkpolicy/networkpolicy.yaml")
 	npTemplate, err := unmarshallNetworkPolicy(yamlFile)
 	if err != nil {
 		err = fmt.Errorf("error reading Service template: %+v", err)
