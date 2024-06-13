@@ -44,11 +44,10 @@ flag_management:
 
 # Exclude files from being collected by Codecov. Ignored files will be skipped during processing.
 ignore:
-  - "**/testing/*.go"
+  - "**/testing/mock_*.go"
   - "**/mock_*.go"
   - "**/*generate*.go"
   - "pkg/client"
   - "**/pkg/client"
   - "**/*.pb.go"
   - "third_party"
-  - "bincover_run_main_test*"
